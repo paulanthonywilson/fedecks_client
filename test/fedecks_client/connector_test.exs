@@ -24,7 +24,7 @@ defmodule FedecksClient.ConnectorTest do
            name: name,
            connector_name: connector_name
          } = ctx do
-      expect(MockWebsocketClient, :start_link, 0, fn _, _, _ -> nil end)
+      expect(MockWebsocketClient, :start_link, 0, fn _, _, _, _ -> nil end)
 
       start(ctx)
       assert_receive {^name, :unregistered}
@@ -36,7 +36,7 @@ defmodule FedecksClient.ConnectorTest do
       TokenStore.set_token(token_store, "a token")
       test_pid = self()
 
-      expect(MockWebsocketClient, :start_link, fn url, handler, opts ->
+      expect(MockWebsocketClient, :start_link, fn url, handler, _, opts ->
         send(test_pid, {:start_link, url, handler, opts})
         start_link_a_process()
       end)
@@ -58,7 +58,7 @@ defmodule FedecksClient.ConnectorTest do
     test "reports and schedules a retry on failure to connect",
          %{token_store: token_store, name: name, connector_name: connector_name} = ctx do
       TokenStore.set_token(token_store, "some token")
-      stub(MockWebsocketClient, :start_link, fn _, _, _ -> {:error, "some reason"} end)
+      stub(MockWebsocketClient, :start_link, fn _, _, _, _ -> {:error, "some reason"} end)
       start(ctx)
 
       assert_receive {^name, {:connection_failed, "some reason"}}
@@ -73,7 +73,7 @@ defmodule FedecksClient.ConnectorTest do
          %{token_store: token_store, name: name, connector_name: connector_name} = ctx do
       TokenStore.set_token(token_store, "some token")
 
-      expect(MockWebsocketClient, :start_link, 0, fn _, _, _ -> {:error, "nothing"} end)
+      expect(MockWebsocketClient, :start_link, 0, fn _, _, _, _ -> {:error, "nothing"} end)
       start(ctx, 500)
       assert_receive {^name, :connecting}
       refute_receive {^name, _}
@@ -93,7 +93,7 @@ defmodule FedecksClient.ConnectorTest do
     } do
       test_pid = self()
 
-      expect(MockWebsocketClient, :start_link, fn url, handler, opts ->
+      expect(MockWebsocketClient, :start_link, fn url, handler, _, opts ->
         send(test_pid, {:start_link, url, handler, opts})
         start_link_a_process()
       end)
@@ -116,7 +116,7 @@ defmodule FedecksClient.ConnectorTest do
       name: name,
       connector_name: connector_name
     } do
-      stub(MockWebsocketClient, :start_link, fn _, _, _ -> {:error, "whatever"} end)
+      stub(MockWebsocketClient, :start_link, fn _, _, _, _ -> {:error, "whatever"} end)
 
       Connector.authenticate(connector_name, %{"username" => "bob", "password" => "shark"})
 
@@ -136,7 +136,7 @@ defmodule FedecksClient.ConnectorTest do
            name: name,
            connector_name: connector_name
          } = ctx do
-      expect(MockWebsocketClient, :start_link, fn _, _, _ -> start_link_a_process() end)
+      expect(MockWebsocketClient, :start_link, fn _, _, _, _ -> start_link_a_process() end)
 
       start(ctx, 50)
 

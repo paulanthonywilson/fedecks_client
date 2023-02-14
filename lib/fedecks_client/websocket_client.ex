@@ -16,6 +16,11 @@ defmodule FedecksClient.WebsocketClient do
     end
   end
 
-  @callback start_link(url :: String.t(), handler_module :: atom(), opts :: Keyword.t()) ::
+  @callback start_link(
+              url :: String.t(),
+              handler_module :: atom(),
+              handler_args :: Keyword.t(),
+              opts :: Keyword.t()
+            ) ::
               {:ok, pid()} | {:error, term()}
 end

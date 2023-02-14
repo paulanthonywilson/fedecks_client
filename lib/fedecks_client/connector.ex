@@ -110,7 +110,7 @@ defmodule FedecksClient.Connector do
       |> :erlang.term_to_binary()
       |> Base.encode64()
 
-    WebsocketClient.start_link(connection_url, handler,
+    WebsocketClient.start_link(connection_url, handler, [],
       extra_headers: [{"x-fedecks-auth", encoded_auth}]
     )
   end

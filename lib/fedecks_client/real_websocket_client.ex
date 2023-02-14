@@ -6,5 +6,5 @@ defmodule FedecksClient.RealWebsocketClient do
   @behaviour FedecksClient.WebsocketClient
 
   @impl FedecksClient.WebsocketClient
-  defdelegate start_link(url, handler, opts), to: :websocket_client
+  defdelegate start_link(url, handler, handler_args, opts), to: :websocket_client
 end
