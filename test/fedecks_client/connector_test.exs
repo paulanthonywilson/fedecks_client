@@ -81,6 +81,56 @@ defmodule FedecksClient.ConnectorTest do
     end
   end
 
+  describe "when connection is lost" do
+    setup %{token_store: token_store} = ctx do
+      TokenStore.set_token(token_store, "a token")
+
+      test_pid = self()
+
+      stub(MockWebsocketClient, :start_link, fn _, _, _, _ ->
+        {:ok, ws_pid} = start_link_a_process()
+        send(test_pid, {:ws_pid, ws_pid})
+        {:ok, ws_pid}
+      end)
+
+      start(ctx, 1)
+      assert_receive {:ws_pid, pretend_ws_pid}
+      flush_message_queue()
+      {:ok, pretend_ws_pid: pretend_ws_pid}
+    end
+
+    test "reconnects when the websocket process terminates", %{pretend_ws_pid: pretend_ws_pid} do
+      send(pretend_ws_pid, :stop_now)
+
+      expect(MockWebsocketClient, :start_link, fn _, _, _, _ ->
+        start_link_a_process()
+      end)
+
+      assert_receive {_, :connected}
+    end
+
+    test "schedules the reconnection with the connect_after", %{
+      pretend_ws_pid: pretend_ws_pid,
+      connector_name: connector_name
+    } do
+      :sys.replace_state(connector_name, fn state -> %{state | connect_after: 750} end)
+
+      send(pretend_ws_pid, :stop_now)
+      assert_receive {_, :connecting}
+      refute_receive {_, :connected}
+    end
+
+    test "no connection scheduled if the token has become nil", %{
+      pretend_ws_pid: pretend_ws_pid,
+      token_store: token_store
+    } do
+      TokenStore.set_token(token_store, nil)
+      send(pretend_ws_pid, :stop_now)
+      refute_receive {_, :connecting}
+      assert_receive {_, :unregistered}
+    end
+  end
+
   describe "authorising with credentials" do
     setup ctx do
       start(ctx)
@@ -175,7 +225,15 @@ defmodule FedecksClient.ConnectorTest do
     end)
   end
 
+  defp flush_message_queue do
+    receive do
+      _ ->
+        flush_message_queue()
+    after
+      1 -> :ok
+    end
+  end
+
   # todo
-  # * websocket terminated!
   # * (re) authorisation when connected
 end

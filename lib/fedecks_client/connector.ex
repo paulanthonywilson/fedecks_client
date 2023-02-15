@@ -18,7 +18,7 @@ defmodule FedecksClient.Connector do
   ]
 
   @enforce_keys enforced_keys
-  defstruct [:connection_status, :timer_ref | enforced_keys]
+  defstruct [:connection_status, :timer_ref, :ws_pid | enforced_keys]
 
   @type connection_status :: :unregistered | :failed_registration | :connected | :connecting
 
@@ -28,6 +28,7 @@ defmodule FedecksClient.Connector do
           token_store: atom(),
           topic: atom(),
           connection_status: connection_status(),
+          ws_pid: pid(),
           timer_ref: nil | reference()
         }
 
@@ -61,19 +62,26 @@ defmodule FedecksClient.Connector do
       }
       |> maybe_schedule_connection_attempt()
 
+    Process.flag(:trap_exit, true)
+
     {:ok, state}
   end
 
   @impl GenServer
   def handle_info({:connect, token}, state) do
     case attempt_connect(%{"fedecks-token" => token}, state) do
-      {:ok, _pid} ->
-        {:noreply, new_connection_status(state, :connected)}
+      {:ok, pid} ->
+        {:noreply, connected(state, pid)}
 
       {:error, reason} ->
         failed_to_connect(reason, state)
         {:noreply, %{state | connection_status: :failing_to_connect}}
     end
+  end
+
+  def handle_info({:EXIT, ws_pid, _}, %{ws_pid: ws_pid} = state) do
+    state = maybe_schedule_connection_attempt(state)
+    {:noreply, state}
   end
 
   @impl GenServer
@@ -87,8 +95,8 @@ defmodule FedecksClient.Connector do
     state = %{state | timer_ref: nil}
 
     case attempt_connect(credentials, state) do
-      {:ok, _pid} ->
-        {:noreply, new_connection_status(state, :connected)}
+      {:ok, pid} ->
+        {:noreply, connected(state, pid)}
 
       {:error, reason} ->
         SimplestPubSub.publish(topic, {topic, {:registration_failed, reason}})
@@ -113,6 +121,10 @@ defmodule FedecksClient.Connector do
     WebsocketClient.start_link(connection_url, handler, [],
       extra_headers: [{"x-fedecks-auth", encoded_auth}]
     )
+  end
+
+  defp connected(state, pid) do
+    %{state | ws_pid: pid} |> new_connection_status(:connected)
   end
 
   defp failed_to_connect(reason, %{topic: topic} = status) do

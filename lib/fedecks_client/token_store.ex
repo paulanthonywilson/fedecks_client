@@ -16,7 +16,7 @@ defmodule FedecksClient.TokenStore do
 
     token =
       case File.read(file) do
-        {:ok, token} -> token
+        {:ok, contents} -> :erlang.binary_to_term(contents, [:safe])
         _ -> nil
       end
 
@@ -32,7 +32,7 @@ defmodule FedecksClient.TokenStore do
   end
 
   def handle_cast({:set_token, token}, %{filename: filename} = state) do
-    File.write!(filename, token)
+    File.write!(filename, :erlang.term_to_binary(token))
     {:noreply, %{state | token: token}}
   end
 

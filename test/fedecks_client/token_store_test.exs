@@ -16,6 +16,12 @@ defmodule FedecksClient.TokenStoreTest do
     assert "my saved token" == TokenStore.token(token_store)
   end
 
+  test "token can be nil", %{token_store: token_store} do
+    :ok = TokenStore.set_token(token_store, "my saved token")
+    :ok = TokenStore.set_token(token_store, nil)
+    assert nil == TokenStore.token(token_store)
+  end
+
   defp ensure_killed(name) do
     pid = Process.whereis(name)
     Process.unlink(pid)
