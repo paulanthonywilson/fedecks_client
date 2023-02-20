@@ -10,26 +10,25 @@ defmodule FedecksClient.Connector do
 
   enforced_keys = [
     :connect_after,
-    :handler,
     :token_store,
     :topic,
     :device_id,
-    :connection_url
+    :connection_uri
   ]
 
   @enforce_keys enforced_keys
-  defstruct [:connection_status, :timer_ref, :ws_pid | enforced_keys]
+  defstruct [:connection_status, :timer_ref, :conn, :conn_ref, :websocket | enforced_keys]
 
   @type connection_status :: :unregistered | :failed_registration | :connected | :connecting
 
   @type t :: %__MODULE__{
           connect_after: pos_integer(),
-          handler: atom(),
           token_store: atom(),
           topic: atom(),
           connection_status: connection_status(),
-          ws_pid: pid(),
-          timer_ref: nil | reference()
+          timer_ref: nil | reference(),
+          conn: nil | Mint.HTTP1,
+          conn_ref: reference()
         }
 
   @spec start_link(keyword) :: :ignore | {:error, any} | {:ok, pid}
@@ -42,6 +41,7 @@ defmodule FedecksClient.Connector do
     GenServer.call(server, :connection_status)
   end
 
+  @spec authenticate(atom | pid | {atom, any} | {:via, atom, any}, any) :: :ok
   def authenticate(server, credentials) do
     GenServer.cast(server, {:authenticate, credentials})
   end
@@ -50,38 +50,24 @@ defmodule FedecksClient.Connector do
   def init(opts) do
     connect_after = Keyword.fetch!(opts, :connect_after)
 
+    uri =
+      opts
+      |> Keyword.fetch!(:connection_url)
+      |> URI.parse()
+      |> IO.inspect()
+
     state =
       %__MODULE__{
         connect_after: connect_after,
-        handler: Keyword.fetch!(opts, :handler),
         token_store: Keyword.fetch!(opts, :token_store),
         topic: Keyword.fetch!(opts, :topic),
         connection_status: :starting,
-        connection_url: Keyword.fetch!(opts, :connection_url),
+        connection_uri: uri,
         device_id: Keyword.fetch!(opts, :device_id)
       }
       |> maybe_schedule_connection_attempt()
 
-    Process.flag(:trap_exit, true)
-
     {:ok, state}
-  end
-
-  @impl GenServer
-  def handle_info({:connect, token}, state) do
-    case attempt_connect(%{"fedecks-token" => token}, state) do
-      {:ok, pid} ->
-        {:noreply, connected(state, pid)}
-
-      {:error, reason} ->
-        failed_to_connect(reason, state)
-        {:noreply, %{state | connection_status: :failing_to_connect}}
-    end
-  end
-
-  def handle_info({:EXIT, ws_pid, _}, %{ws_pid: ws_pid} = state) do
-    state = maybe_schedule_connection_attempt(state)
-    {:noreply, state}
   end
 
   @impl GenServer
@@ -95,8 +81,8 @@ defmodule FedecksClient.Connector do
     state = %{state | timer_ref: nil}
 
     case attempt_connect(credentials, state) do
-      {:ok, pid} ->
-        {:noreply, connected(state, pid)}
+      {:ok, conn, ref} ->
+        {:noreply, connected(state, conn, ref)}
 
       {:error, reason} ->
         SimplestPubSub.publish(topic, {topic, {:registration_failed, reason}})
@@ -104,27 +90,43 @@ defmodule FedecksClient.Connector do
     end
   end
 
+  @impl GenServer
+  def handle_info(
+        {:tcp, _port, _data} = http_reply,
+        %{websocket: nil, conn: conn, ref: ref} = status
+      ) do
+    case Mint.WebSocket.stream(conn, http_reply) do
+      {:ok, conn,
+       [{:status, ^ref, 101 = status_code}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} ->
+        {:ok, conn, websocket} = Mint.WebSocket.new(conn, ref, status_code, resp_headers)
+        {:noreply, %{status | websocket: websocket, conn: conn}}
+    end
+  end
+
   defp attempt_connect(
-         authentication,
+         credentials,
          %{
-           connection_url: connection_url,
-           device_id: device_id,
-           handler: handler
+           connection_uri: connection_uri,
+           device_id: device_id
          }
        ) do
     encoded_auth =
-      authentication
+      credentials
       |> Enum.into(%{"fedecks-device-id" => device_id})
       |> :erlang.term_to_binary()
       |> Base.encode64()
 
-    WebsocketClient.start_link(connection_url, handler, [],
-      extra_headers: [{"x-fedecks-auth", encoded_auth}]
-    )
+    # todo
+    {:ok, conn} = Mint.HTTP.connect(:http, connection_uri.host, connection_uri.port)
+
+    {:ok, conn, ref} =
+      Mint.WebSocket.upgrade(:ws, conn, connection_uri.path, [{"x-fedecks-auth", encoded_auth}])
+
+    {:ok, conn, ref}
   end
 
-  defp connected(state, pid) do
-    %{state | ws_pid: pid} |> new_connection_status(:connected)
+  defp connected(state, conn, ref) do
+    %{state | conn: conn, conn_ref: ref} |> new_connection_status(:connected)
   end
 
   defp failed_to_connect(reason, %{topic: topic} = status) do
