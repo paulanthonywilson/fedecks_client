@@ -1,152 +1,86 @@
 defmodule FedecksClient.Connector do
   @moduledoc """
-  Starts the connection to the server.
+  Manages connecting, and reconnecting, to a server over websockets
   """
-  use GenServer
-
-  use FedecksClient.WebsocketClient
+  use FedecksClient.Websockets.MintWs
 
   alias FedecksClient.TokenStore
 
-  enforced_keys = [
-    :connect_after,
-    :handler,
-    :token_store,
-    :topic,
-    :device_id,
-    :connection_url
-  ]
-
-  @enforce_keys enforced_keys
-  defstruct [:connection_status, :timer_ref, :ws_pid | enforced_keys]
+  use GenServer
 
   @type connection_status :: :unregistered | :failed_registration | :connected | :connecting
 
+  keys = [:broadcast_topic, :mint_ws, :connect_delay]
+  @enforce_keys keys
+
+  defstruct [:connection_status | keys]
+
   @type t :: %__MODULE__{
-          connect_after: pos_integer(),
-          handler: atom(),
-          token_store: atom(),
-          topic: atom(),
+          broadcast_topic: atom(),
           connection_status: connection_status(),
-          ws_pid: pid(),
-          timer_ref: nil | reference()
+          mint_ws: FedecksClient.Websockets.MintWs.t(),
+          connect_delay: non_neg_integer()
         }
 
   @spec start_link(keyword) :: :ignore | {:error, any} | {:ok, pid}
-  def start_link(opts) do
-    name = Keyword.fetch!(opts, :name)
-    GenServer.start_link(__MODULE__, opts, name: name)
+  def start_link(args) do
+    name = Keyword.fetch!(args, :connector_name)
+    GenServer.start_link(__MODULE__, args, name: name)
   end
 
   def connection_status(server) do
     GenServer.call(server, :connection_status)
   end
 
-  def authenticate(server, credentials) do
-    GenServer.cast(server, {:authenticate, credentials})
-  end
-
   @impl GenServer
-  def init(opts) do
-    connect_after = Keyword.fetch!(opts, :connect_after)
+  def init(args) do
+    url = Keyword.fetch!(args, :connection_url)
+    device_id = Keyword.fetch!(args, :device_id)
+    token_store = Keyword.fetch!(args, :token_store)
 
-    state =
-      %__MODULE__{
-        connect_after: connect_after,
-        handler: Keyword.fetch!(opts, :handler),
-        token_store: Keyword.fetch!(opts, :token_store),
-        topic: Keyword.fetch!(opts, :topic),
-        connection_status: :starting,
-        connection_url: Keyword.fetch!(opts, :connection_url),
-        device_id: Keyword.fetch!(opts, :device_id)
-      }
-      |> maybe_schedule_connection_attempt()
+    case MintWs.new(url, device_id) do
+      {:ok, mint_ws} ->
+        IO.inspect(mint_ws)
 
-    Process.flag(:trap_exit, true)
+        state = %__MODULE__{
+          broadcast_topic: Keyword.fetch!(args, :name),
+          mint_ws: nil,
+          connect_delay: nil
+        }
 
-    {:ok, state}
-  end
+        state =
+          case TokenStore.token(token_store) do
+            nil ->
+              new_connection_status(state, :unregistered)
 
-  @impl GenServer
-  def handle_info({:connect, token}, state) do
-    case attempt_connect(%{"fedecks-token" => token}, state) do
-      {:ok, pid} ->
-        {:noreply, connected(state, pid)}
+            token ->
+              IO.inspect(MintWs)
+              MintWs.connect(mint_ws, %{"fedecks-token" => token})
+              new_connection_status(state, :connecting)
+          end
+
+        {:ok, state}
 
       {:error, reason} ->
-        failed_to_connect(reason, state)
-        {:noreply, %{state | connection_status: :failing_to_connect}}
+        {:stop, reason}
     end
   end
 
-  def handle_info({:EXIT, ws_pid, _}, %{ws_pid: ws_pid} = state) do
-    state = maybe_schedule_connection_attempt(state)
-    {:noreply, state}
-  end
-
   @impl GenServer
-  def handle_call(:connection_status, _, %{connection_status: connection_status} = state) do
+  def handle_call(:connection_status, _from, %{connection_status: connection_status} = state) do
     {:reply, connection_status, state}
   end
 
-  @impl GenServer
-  def handle_cast({:authenticate, credentials}, %{topic: topic, timer_ref: timer_ref} = state) do
-    if timer_ref, do: Process.cancel_timer(timer_ref)
-    state = %{state | timer_ref: nil}
-
-    case attempt_connect(credentials, state) do
-      {:ok, pid} ->
-        {:noreply, connected(state, pid)}
-
-      {:error, reason} ->
-        SimplestPubSub.publish(topic, {topic, {:registration_failed, reason}})
-        {:noreply, %{state | connection_status: :unregistered}}
-    end
+  defp broadcast(%{broadcast_topic: topic}, message) do
+    SimplestPubSub.publish(topic, {topic, message})
   end
 
-  defp attempt_connect(
-         authentication,
-         %{
-           connection_url: connection_url,
-           device_id: device_id,
-           handler: handler
-         }
-       ) do
-    encoded_auth =
-      authentication
-      |> Enum.into(%{"fedecks-device-id" => device_id})
-      |> :erlang.term_to_binary()
-      |> Base.encode64()
+  # defp new_connection_status(%{connection_status: connection_status} = state, connection_status) do
+  #   state
+  # end
 
-    WebsocketClient.start_link(connection_url, handler, [],
-      extra_headers: [{"x-fedecks-auth", encoded_auth}]
-    )
-  end
-
-  defp connected(state, pid) do
-    %{state | ws_pid: pid} |> new_connection_status(:connected)
-  end
-
-  defp failed_to_connect(reason, %{topic: topic} = status) do
-    maybe_schedule_connection_attempt(status)
-    SimplestPubSub.publish(topic, {topic, {:connection_failed, reason}})
-  end
-
-  defp maybe_schedule_connection_attempt(
-         %{connect_after: connect_after, token_store: token_store} = state
-       ) do
-    case TokenStore.token(token_store) do
-      nil ->
-        new_connection_status(state, :unregistered)
-
-      token ->
-        timer_ref = Process.send_after(self(), {:connect, token}, connect_after)
-        new_connection_status(%{state | timer_ref: timer_ref}, :connecting)
-    end
-  end
-
-  defp new_connection_status(%{topic: topic} = state, new_connection_status) do
-    SimplestPubSub.publish(topic, {topic, new_connection_status})
-    %{state | connection_status: new_connection_status}
+  defp new_connection_status(state, connection_status) do
+    broadcast(state, connection_status)
+    %{state | connection_status: connection_status}
   end
 end

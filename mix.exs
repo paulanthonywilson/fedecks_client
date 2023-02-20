@@ -22,12 +22,19 @@ defmodule FedecksClient.MixProject do
 
   defp deps do
     [
+      {:mint_web_socket, "~> 1.0"},
       {:websocket_client, git: "git@github.com:vtm9/websocket_client.git"},
       {:simplest_pub_sub, "~> 0.1.0"},
       {:mox, "~> 1.0", only: :test},
       {:credo, "~> 1.6", only: [:dev, :test]},
       {:dialyxir, "~> 1.2", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.29.1", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.29.1", only: :dev, runtime: false},
+
+      # For setting up a Fedecks server in tests
+      {:phoenix, "~> 1.7.0-rc.3", only: :test, override: true},
+      {:plug_cowboy, "~> 2.5", only: :test},
+      {:fedecks_server, git: "git@github.com:paulanthonywilson/fedecks_server.git", only: :test},
+      {:recon, "~> 2.5", only: :test}
     ]
   end
 

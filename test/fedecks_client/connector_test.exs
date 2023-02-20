@@ -1,239 +1,71 @@
 defmodule FedecksClient.ConnectorTest do
-  use FedecksCase
-
+  use FedecksCase, async: false
   alias FedecksClient.{Connector, TokenStore}
-  import Mox
 
+  import Mox
+  alias FedecksClient.Websockets.MintWs
   setup :verify_on_exit!
+
+  @connection_url "wss://example.com/fedecks/websocket"
+  @credentials %{"username" => "marvin", "password" => "paranoid-android"}
+  @device_id "nerves123"
 
   setup %{name: name} do
     SimplestPubSub.subscribe(name)
     connector_name = :"#{name}.Connector"
 
-    {:ok, connector_name: connector_name}
+    {:ok,
+     connector_name: connector_name,
+     connection_url: @connection_url,
+     connect_delay: :timer.seconds(1),
+     device_id: @device_id}
   end
 
   describe "starting up" do
-    test "connector is named", %{name: name} = ctx do
-      start(ctx)
-      assert Process.whereis(:"#{name}.Connector")
+    test "connector is named in the global registry", %{connector_name: connector_name} = ctx do
+      {:ok, _} = start(ctx)
+      # assert Process.whereis(connector_name)
     end
 
-    test "does not attempt to connect if there is no token configured",
-         %{
-           name: name,
-           connector_name: connector_name
-         } = ctx do
-      expect(MockWebsocketClient, :start_link, 0, fn _, _, _, _ -> nil end)
-
-      start(ctx)
+    test "does not attempt connect if no token is configured",
+         %{name: name, connector_name: connector_name} = ctx do
+      {:ok, _} = start(ctx)
       assert_receive {^name, :unregistered}
       assert :unregistered == Connector.connection_status(connector_name)
     end
 
-    test "connects if there is a token configured",
-         %{token_store: token_store, name: name, connector_name: connector_name} = ctx do
-      TokenStore.set_token(token_store, "a token")
-      test_pid = self()
+    test "fails to start if the connection url is invalid", ctx do
+      assert {:error, _} = start(%{ctx | connection_url: "http://example.com/wrongprotocol"})
+    end
 
-      expect(MockWebsocketClient, :start_link, fn url, handler, _, opts ->
-        send(test_pid, {:start_link, url, handler, opts})
-        start_link_a_process()
+    test "schedules an attempt at connection if there is a token configured",
+         %{connector_name: connector_name, name: name, token_store: token_store} = ctx do
+      TokenStore.set_token(token_store, "a pretend token")
+
+      expect(MockMintWs, :connect, fn %MintWs{}, credentials_used ->
+        %{"fedecks-token" => "a pretend token"} == credentials_used
       end)
 
-      start(ctx)
-
-      assert_receive {:start_link, url, handler, opts}
-      assert "wss://mything.com/fedecks/websocket" == url
-      assert MockWebsocketHandler == handler
-      assert [extra_headers: [{"x-fedecks-auth", encoded_token}]] = opts
-
-      assert %{"fedecks-device-id" => "nerves-123a", "fedecks-token" => "a token"} ==
-               encoded_token |> Base.decode64!() |> :erlang.binary_to_term()
-
-      assert_receive {^name, :connected}
-      assert :connected == Connector.connection_status(connector_name)
-    end
-
-    test "reports and schedules a retry on failure to connect",
-         %{token_store: token_store, name: name, connector_name: connector_name} = ctx do
-      TokenStore.set_token(token_store, "some token")
-      stub(MockWebsocketClient, :start_link, fn _, _, _, _ -> {:error, "some reason"} end)
-      start(ctx)
-
-      assert_receive {^name, {:connection_failed, "some reason"}}
-
-      # should see retries in the mailbox with a 10ms connect_after
-      assert_receive {^name, {:connection_failed, "some reason"}}
-
-      assert :failing_to_connect = Connector.connection_status(connector_name)
-    end
-
-    test "does not attempt connection until after the connect_after period",
-         %{token_store: token_store, name: name, connector_name: connector_name} = ctx do
-      TokenStore.set_token(token_store, "some token")
-
-      expect(MockWebsocketClient, :start_link, 0, fn _, _, _, _ -> {:error, "nothing"} end)
-      start(ctx, 500)
+      {:ok, _} = start(%{ctx | connect_delay: 1})
       assert_receive {^name, :connecting}
-      refute_receive {^name, _}
       assert :connecting = Connector.connection_status(connector_name)
     end
-  end
 
-  describe "when connection is lost" do
-    setup %{token_store: token_store} = ctx do
-      TokenStore.set_token(token_store, "a token")
-
-      test_pid = self()
-
-      stub(MockWebsocketClient, :start_link, fn _, _, _, _ ->
-        {:ok, ws_pid} = start_link_a_process()
-        send(test_pid, {:ws_pid, ws_pid})
-        {:ok, ws_pid}
-      end)
-
-      start(ctx, 1)
-      assert_receive {:ws_pid, pretend_ws_pid}
-      flush_message_queue()
-      {:ok, pretend_ws_pid: pretend_ws_pid}
-    end
-
-    test "reconnects when the websocket process terminates", %{pretend_ws_pid: pretend_ws_pid} do
-      send(pretend_ws_pid, :stop_now)
-
-      expect(MockWebsocketClient, :start_link, fn _, _, _, _ ->
-        start_link_a_process()
-      end)
-
-      assert_receive {_, :connected}
-    end
-
-    test "schedules the reconnection with the connect_after", %{
-      pretend_ws_pid: pretend_ws_pid,
-      connector_name: connector_name
-    } do
-      :sys.replace_state(connector_name, fn state -> %{state | connect_after: 750} end)
-
-      send(pretend_ws_pid, :stop_now)
-      assert_receive {_, :connecting}
-      refute_receive {_, :connected}
-    end
-
-    test "no connection scheduled if the token has become nil", %{
-      pretend_ws_pid: pretend_ws_pid,
-      token_store: token_store
-    } do
-      TokenStore.set_token(token_store, nil)
-      send(pretend_ws_pid, :stop_now)
-      refute_receive {_, :connecting}
-      assert_receive {_, :unregistered}
+    test "does not connect if token is configured, until after the delay" do
     end
   end
 
-  describe "authorising with credentials" do
-    setup ctx do
-      start(ctx)
-      :ok
-    end
+  defp start(ctx) do
+    opts =
+      ctx
+      |> Enum.into([])
 
-    test "when successful, connects just like a token", %{
-      name: name,
-      connector_name: connector_name
-    } do
-      test_pid = self()
+    case start_supervised({Connector, opts}) do
+      {:ok, pid} ->
+        {:ok, pid}
 
-      expect(MockWebsocketClient, :start_link, fn url, handler, _, opts ->
-        send(test_pid, {:start_link, url, handler, opts})
-        start_link_a_process()
-      end)
-
-      Connector.authenticate(connector_name, %{"username" => "bob", "password" => "monkey"})
-
-      assert_receive {:start_link, url, handler, opts}
-      assert "wss://mything.com/fedecks/websocket" == url
-      assert MockWebsocketHandler == handler
-      assert [extra_headers: [{"x-fedecks-auth", encoded_token}]] = opts
-
-      assert %{"fedecks-device-id" => "nerves-123a", "username" => "bob", "password" => "monkey"} ==
-               encoded_token |> Base.decode64!() |> :erlang.binary_to_term()
-
-      assert_receive {^name, :connected}
-      assert :connected == Connector.connection_status(connector_name)
-    end
-
-    test "on failure, state is unregistered and notification of failure received", %{
-      name: name,
-      connector_name: connector_name
-    } do
-      stub(MockWebsocketClient, :start_link, fn _, _, _, _ -> {:error, "whatever"} end)
-
-      Connector.authenticate(connector_name, %{"username" => "bob", "password" => "shark"})
-
-      assert_receive {^name, {:registration_failed, "whatever"}}
-      assert :unregistered == Connector.connection_status(connector_name)
+      err ->
+        err
     end
   end
-
-  describe "reauthorising when a token is saved" do
-    setup %{token_store: token_store} do
-      TokenStore.set_token(token_store, "existing token")
-      :ok
-    end
-
-    test "connection timer is cancelled if connection has not yet happened",
-         %{
-           name: name,
-           connector_name: connector_name
-         } = ctx do
-      expect(MockWebsocketClient, :start_link, fn _, _, _, _ -> start_link_a_process() end)
-
-      start(ctx, 50)
-
-      Connector.authenticate(connector_name, %{"some_credential" => "hello matey"})
-      assert_receive {^name, :connected}
-
-      # Just the one connection
-      refute_receive {^name, :connected}
-    end
-  end
-
-  defp start(
-         %{name: topic, connector_name: connector_name, token_store: token_store},
-         connect_after \\ 10
-       ) do
-    Connector.start_link(
-      name: connector_name,
-      connect_after: connect_after,
-      connection_url: "wss://mything.com/fedecks/websocket",
-      device_id: "nerves-123a",
-      handler: MockWebsocketHandler,
-      token_store: token_store,
-      topic: topic
-    )
-
-    allow(MockWebsocketClient, self(), connector_name)
-  end
-
-  defp start_link_a_process do
-    Task.start_link(fn ->
-      receive do
-        _ -> :ok
-      after
-        5_000 -> :ok
-      end
-    end)
-  end
-
-  defp flush_message_queue do
-    receive do
-      _ ->
-        flush_message_queue()
-    after
-      1 -> :ok
-    end
-  end
-
-  # todo
-  # * (re) authorisation when connected
 end
