@@ -93,13 +93,17 @@ defmodule FedecksClient.Connector do
   @impl GenServer
   def handle_info(
         {:tcp, _port, _data} = http_reply,
-        %{websocket: nil, conn: conn, ref: ref} = status
+        %{websocket: nil, conn: conn, conn_ref: ref} = status
       ) do
     case Mint.WebSocket.stream(conn, http_reply) do
       {:ok, conn,
        [{:status, ^ref, 101 = status_code}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} ->
         {:ok, conn, websocket} = Mint.WebSocket.new(conn, ref, status_code, resp_headers)
         {:noreply, %{status | websocket: websocket, conn: conn}}
+
+      {:ok, _conn, [{:status, ^ref, 403} | _]} ->
+        broadcast(status, :registration_failed)
+        {:noreply, %{conn: nil, conn_ref: nil}}
     end
   end
 
@@ -150,5 +154,9 @@ defmodule FedecksClient.Connector do
   defp new_connection_status(%{topic: topic} = state, new_connection_status) do
     SimplestPubSub.publish(topic, {topic, new_connection_status})
     %{state | connection_status: new_connection_status}
+  end
+
+  defp broadcast(%{topic: topic}, message) do
+    SimplestPubSub.publish(topic, {topic, message})
   end
 end

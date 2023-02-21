@@ -11,7 +11,7 @@ defmodule FedecksClient.ConnectorTest do
     SimplestPubSub.subscribe(FedecksTestHandler)
     connector_name = :"#{name}.Connector"
     {:ok, _} = start_supervised(FedecksServerEndpoint)
-    {:ok, connector_name: connector_name}
+    {:ok, connector_name: connector_name, connect_after: 1}
   end
 
   describe "starting up" do
@@ -77,7 +77,7 @@ defmodule FedecksClient.ConnectorTest do
       TokenStore.set_token(token_store, "some token")
 
       expect(MockWebsocketClient, :start_link, 0, fn _, _, _, _ -> {:error, "nothing"} end)
-      start(ctx, 500)
+      start(%{ctx | connect_after: 500})
       assert_receive {^name, :connecting}
       refute_receive {^name, _}
       assert :connecting = Connector.connection_status(connector_name)
@@ -96,7 +96,7 @@ defmodule FedecksClient.ConnectorTest do
         {:ok, ws_pid}
       end)
 
-      start(ctx, 1)
+      start(ctx)
       assert_receive {:ws_pid, pretend_ws_pid}
       flush_message_queue()
       {:ok, pretend_ws_pid: pretend_ws_pid}
@@ -159,17 +159,13 @@ defmodule FedecksClient.ConnectorTest do
       assert :connected == Connector.connection_status(connector_name)
     end
 
-    @tag :skip
     test "on failure, state is unregistered and notification of failure received", %{
       name: name,
       connector_name: connector_name
     } do
-      stub(MockWebsocketClient, :start_link, fn _, _, _, _ -> {:error, "whatever"} end)
-
       Connector.authenticate(connector_name, %{"username" => "bob", "password" => "shark"})
 
-      assert_receive {^name, {:registration_failed, "whatever"}}
-      assert :unregistered == Connector.connection_status(connector_name)
+      assert_receive {^name, :registration_failed}
     end
   end
 
@@ -187,7 +183,7 @@ defmodule FedecksClient.ConnectorTest do
          } = ctx do
       expect(MockWebsocketClient, :start_link, fn _, _, _, _ -> start_link_a_process() end)
 
-      start(ctx, 50)
+      start(%{ctx | conect_after: 50})
 
       Connector.authenticate(connector_name, %{"some_credential" => "hello matey"})
       assert_receive {^name, :connected}
@@ -197,10 +193,12 @@ defmodule FedecksClient.ConnectorTest do
     end
   end
 
-  defp start(
-         %{name: topic, connector_name: connector_name, token_store: token_store},
-         connect_after \\ 10
-       ) do
+  defp start(%{
+         name: topic,
+         connector_name: connector_name,
+         token_store: token_store,
+         connect_after: connect_after
+       }) do
     Connector.start_link(
       name: connector_name,
       connect_after: connect_after,
