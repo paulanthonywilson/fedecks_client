@@ -1,12 +1,35 @@
 defmodule FedecksClient.Websockets.WebsocketUrl do
   @moduledoc """
-  Holds and validates  websocket url in a way that is useful for using with Mint Websockets
+  Holds and validates  websocket url in a way that is useful for using with Mint Websockets.
+
+  Struct values:
+
+  * `scheme`: either atoms `:ws` or `:wss`
+  * `http_scheme`: if scheme is `:ws` then `http`, otherwise `https`. Used by establish the
+    initial `Mint` connection before upgrade
+  * `port`: the TCP port (obvs)
+  * `path`: Path part of theurl (obvs)
   """
 
   required_keys = [:scheme, :http_scheme, :host, :port, :path]
   @enforce_keys required_keys
   defstruct required_keys
 
+  @type t :: %__MODULE__{
+          scheme: :ws | :wss,
+          http_scheme: :http | :https,
+          port: non_neg_integer(),
+          path: String.t()
+        }
+
+  @doc """
+  Parses and validates a String websocket url.
+  * Only `ws` and `wss` schemes are accepted.
+  * Host is required.
+  * Port is dreived from the scheme, is not part of the url
+  * Path is normalised to "/" if it is absent
+  """
+  @spec new(url :: String.t()) :: {:ok, t()} | {:error, reason :: String.t()}
   def new(string_url) do
     string_url
     |> URI.new()

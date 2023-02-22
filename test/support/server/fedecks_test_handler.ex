@@ -1,8 +1,11 @@
 defmodule FedecksTestHandler do
-  @behaviour FedecksServer.FedecksHandler
+  alias FedecksServer.FedecksHandler
+  @behaviour FedecksHandler
 
+  @impl FedecksHandler
   def otp_app, do: :fedecks_client
 
+  @impl FedecksHandler
   def authenticate?(args) do
     broadcast(:authenticate?)
 
@@ -12,9 +15,16 @@ defmodule FedecksTestHandler do
     end
   end
 
+  @impl FedecksHandler
   def connection_established(device_id) do
     broadcast({:connection_established, device_id})
+    SimplestPubSub.subscribe({:message_to, device_id})
     :ok
+  end
+
+  @impl FedecksHandler
+  def handle_info(_device_id, message) do
+    {:push, message}
   end
 
   defp broadcast(msg) do
