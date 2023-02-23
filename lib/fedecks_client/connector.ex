@@ -54,7 +54,6 @@ defmodule FedecksClient.Connector do
       opts
       |> Keyword.fetch!(:connection_url)
       |> URI.parse()
-      |> IO.inspect()
 
     state =
       %__MODULE__{

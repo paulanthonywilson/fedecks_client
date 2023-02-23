@@ -8,16 +8,6 @@ defmodule FedecksClient.Websockets.MintWs do
   @enforce_keys required_keys
   defstruct [:websocket, :conn, :ref | required_keys]
 
-  @spec new(binary, any) ::
-          {:error, <<_::64, _::_*8>>}
-          | {:ok,
-             %FedecksClient.Websockets.MintWs{
-               conn: nil,
-               device_id: any,
-               ref: nil,
-               websocket: nil,
-               ws_url: FedecksClient.Websockets.WebsocketUrl.t()
-             }}
   def new(url, device_id) do
     with {:ok, ws_url} <- WebsocketUrl.new(url) do
       {:ok, %__MODULE__{ws_url: ws_url, device_id: device_id}}
@@ -39,8 +29,31 @@ defmodule FedecksClient.Websockets.MintWs do
     end
   end
 
-  def handle_in(%{conn: conn, ref: ref, websocket: nil} = mint_ws, upgrade_message) do
-    case Mint.WebSocket.stream(conn, upgrade_message) do
+  def send(mint_ws, message) do
+    do_send(mint_ws, :erlang.term_to_binary(message))
+  end
+
+  def request_token(mint_ws) do
+    do_send(mint_ws, :erlang.term_to_binary('token_please'))
+  end
+
+  def send_raw(mint_ws, message) do
+    do_send(mint_ws, message)
+  end
+
+  defp do_send(%{conn: conn, websocket: websocket, ref: ref} = mint_ws, message) do
+    with {:ok, websocket, data} <-
+           Mint.WebSocket.encode(websocket, {:binary, message}),
+         {:ok, conn} <- Mint.WebSocket.stream_request_body(conn, ref, data) do
+      {:ok, %{mint_ws | conn: conn, websocket: websocket}}
+    else
+      err ->
+        raise inspect(err)
+    end
+  end
+
+  def handle_in(%{conn: conn, ref: ref, websocket: nil} = mint_ws, message) do
+    case Mint.WebSocket.stream(conn, message) do
       {:ok, conn,
        [{:status, ^ref, 101 = status_code}, {:headers, ^ref, resp_headers}, {:done, ^ref}]} ->
         {:ok, conn, websocket} = Mint.WebSocket.new(conn, ref, status_code, resp_headers)
@@ -51,7 +64,7 @@ defmodule FedecksClient.Websockets.MintWs do
         close(mint_ws, conn)
         {:upgrade_error, status_code}
 
-      {:ok, conn, _} ->
+      {:ok, conn, s} ->
         close(mint_ws, conn)
         {:error, :unexpected_on_non_upgraded_connection}
     end
@@ -61,6 +74,10 @@ defmodule FedecksClient.Websockets.MintWs do
     case Mint.WebSocket.stream(conn, message) do
       {:ok, conn, [{:data, ^ref, data}]} ->
         decode(%{mint_ws | conn: conn}, data)
+
+      err ->
+        {:ok, mint_ws} = close(mint_ws)
+        {:error, mint_ws, err}
     end
   end
 

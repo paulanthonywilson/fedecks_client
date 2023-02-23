@@ -33,7 +33,8 @@ defmodule FedecksClient.MixProject do
       # For setting up a Fedecks server in tests
       {:phoenix, "~> 1.7.0-rc.3", only: :test, override: true},
       {:plug_cowboy, "~> 2.5", only: :test},
-      {:fedecks_server, git: "git@github.com:paulanthonywilson/fedecks_server.git", only: :test}
+      {:fedecks_server, git: "git@github.com:paulanthonywilson/fedecks_server.git", only: :test},
+      {:recon, "~> 2.5", only: :test}
     ]
   end
 

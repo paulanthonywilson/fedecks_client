@@ -48,7 +48,7 @@ defmodule FedecksClient.Websockets.MintWsTest do
                |> MintWs.connect(%{"username" => "bob", "password" => "bob's password"})
 
       # From Mint websocket upgrade
-      assert_receive {:tcp, _port, mint_data} = mint_message
+      assert_receive {:tcp, _socket, mint_data} = mint_message
 
       assert mint_data =~ "Switching Protocols"
 
@@ -58,18 +58,20 @@ defmodule FedecksClient.Websockets.MintWsTest do
       MintWs.close(mint_ws)
     end
 
-    test "can not only process ugrade message when already upgraded" do
+    test "can not  process ugrade message when already upgraded" do
       {:ok, not_upgraded_mint_ws} =
         @test_url
         |> new()
         |> MintWs.connect(%{"username" => "bob", "password" => "bob's password"})
 
       # From Mint websocket upgrade
-      assert_receive {:tcp, _port, _} = upgrade_message
+      assert_receive {:tcp, _socket, _} = upgrade_message
 
-      {:upgraded, _mint_ws} = MintWs.handle_in(not_upgraded_mint_ws, upgrade_message)
+      {:upgraded, mint_ws} = MintWs.handle_in(not_upgraded_mint_ws, upgrade_message)
 
-      assert_receive {:tcp, _port, _} = fedecks_token
+      {:ok, _mint_ws} = MintWs.request_token(mint_ws)
+
+      assert_receive {:tcp, _socket, _} = fedecks_token
 
       capture_log(fn ->
         assert {:error, :unexpected_on_non_upgraded_connection} =
@@ -84,7 +86,7 @@ defmodule FedecksClient.Websockets.MintWsTest do
                |> MintWs.connect(%{"username" => "bob", "password" => "bad password"})
 
       # From Mint websocket upgrade
-      assert_receive {:tcp, _port, mint_data} = mint_message
+      assert_receive {:tcp, _socket, mint_data} = mint_message
 
       assert mint_data =~ "Forbidden"
       assert {:upgrade_error, 403} = MintWs.handle_in(mint_ws, mint_message)
@@ -96,23 +98,25 @@ defmodule FedecksClient.Websockets.MintWsTest do
     end
   end
 
-  describe "receive messages" do
+  describe "sending" do
     setup do
-      {:ok, mint_ws} =
-        @test_url
-        |> new()
-        |> MintWs.connect(%{"username" => "bob", "password" => "bob's password"})
-
-      assert_receive {:tcp, _port, _} = upgrade_message
-
-      {:upgraded, mint_ws} = MintWs.handle_in(mint_ws, upgrade_message)
-      on_exit(fn -> MintWs.close(mint_ws) end)
-
-      {:ok, mint_ws: mint_ws}
+      SimplestPubSub.subscribe(FedecksTestHandler)
+      {:ok, mint_ws: connect_and_upgrade()}
     end
 
-    test "receiving fedecks token", %{mint_ws: mint_ws} do
-      assert_receive {:tcp, _port, _} = token_message
+    test "a message", %{mint_ws: mint_ws} do
+      {:ok, %MintWs{}} = MintWs.send(mint_ws, "hello matey")
+      assert_receive {FedecksTestHandler, {:server_received, "hello matey"}}
+    end
+
+    test "a raw binary", %{mint_ws: mint_ws} do
+      {:ok, %MintWs{}} = MintWs.send_raw(mint_ws, "hello matey")
+      assert_receive {FedecksTestHandler, {:server_received_raw, "hello matey"}}
+    end
+
+    test "requesting a token", %{mint_ws: mint_ws} do
+      {:ok, %MintWs{}} = MintWs.request_token(mint_ws)
+      assert_receive {:tcp, _socket, _} = token_message
 
       assert {:messages, %MintWs{}, [{:fedecks_token, token}]} =
                MintWs.handle_in(mint_ws, token_message)
@@ -121,28 +125,63 @@ defmodule FedecksClient.Websockets.MintWsTest do
 
       assert {:ok, @device_id} == FedecksServer.Token.from_token(token, secrets)
     end
+  end
+
+  describe "receive messages" do
+    setup ctx do
+      mint_ws = connect_and_upgrade(ctx)
+
+      {:ok, mint_ws: mint_ws}
+    end
 
     test "receiving other fedecks message", %{mint_ws: mint_ws} do
-      assert_receive {:tcp, _port, _} = token_message
-      {:messages, mint_ws, [{:fedecks_token, _}]} = MintWs.handle_in(mint_ws, token_message)
-
       SimplestPubSub.publish({:message_to, @device_id}, "hello matey")
-      assert_receive {:tcp, _port, _} = other_message
+      assert_receive {:tcp, _socket, _} = other_message
 
       assert {:messages, %MintWs{}, ["hello matey"]} = MintWs.handle_in(mint_ws, other_message)
     end
 
-    @tag skip: true
     test "decoding multiple messages", %{mint_ws: mint_ws} do
-      assert_receive {:tcp, _port, _} = token_message
-      MintWs.handle_in(mint_ws, token_message)
+      %{conn: %{socket: socket}} = mint_ws
 
-      for i <- 1..3, do: SimplestPubSub.publish({:message_to, @device_id}, "message #{i}")
+      # Can not reliably predict the number of frames received so here  a message is captured
+      assert {:messages, %MintWs{}, [{:fedecks_token, _}, "message 1", "message 2"]} =
+               MintWs.handle_in(
+                 %{mint_ws | websocket: %Mint.WebSocket{}},
+                 {:tcp, socket,
+                  <<130, 126, 0, 163, 131, 104, 2, 107, 0, 5, 116, 111, 107, 101, 110, 109, 0, 0,
+                    0, 147, 81, 84, 69, 121, 79, 69, 100, 68, 84, 81, 46, 50, 82, 120, 68, 97,
+                    100, 99, 73, 90, 83, 86, 105, 72, 72, 112, 68, 56, 115, 100, 76, 113, 122,
+                    122, 69, 79, 51, 57, 54, 118, 117, 70, 122, 82, 52, 110, 108, 81, 113, 113,
+                    100, 95, 103, 51, 104, 120, 49, 70, 106, 86, 113, 84, 115, 75, 107, 48, 57,
+                    103, 75, 77, 46, 121, 109, 87, 57, 72, 52, 81, 116, 113, 113, 116, 118, 83,
+                    111, 114, 65, 46, 122, 86, 80, 53, 53, 54, 55, 57, 67, 85, 102, 77, 49, 108,
+                    95, 54, 114, 53, 78, 113, 53, 122, 55, 76, 72, 99, 73, 90, 73, 80, 73, 77, 82,
+                    82, 72, 78, 46, 82, 84, 107, 54, 108, 103, 113, 115, 79, 99, 65, 100, 114,
+                    116, 73, 67, 87, 79, 88, 110, 69, 103, 130, 15, 131, 109, 0, 0, 0, 9, 109,
+                    101, 115, 115, 97, 103, 101, 32, 49, 130, 15, 131, 109, 0, 0, 0, 9, 109, 101,
+                    115, 115, 97, 103, 101, 32, 50>>}
+               )
+    end
 
-      assert_receive {:tcp, _port, _} = messages
+    test "bad messages ignored", %{mint_ws: mint_ws} do
+      %{conn: %{socket: socket}} = mint_ws
 
-      assert {:messages, %MintWs{}, ["message 1", "message 2"]} =
-               MintWs.handle_in(mint_ws, messages)
+      assert {:messages, %MintWs{}, []} =
+               MintWs.handle_in(
+                 %{mint_ws | websocket: %Mint.WebSocket{}},
+                 {:tcp, socket, "lolnope"}
+               )
+    end
+
+    test "errors handled", %{mint_ws: mint_ws} do
+      assert {:error, mint_ws, :unknown} =
+               MintWs.handle_in(
+                 %{mint_ws | websocket: %Mint.WebSocket{}},
+                 {:tcp, :erlang.list_to_port('#Port<0.9999>'), "lolnope"}
+               )
+
+      assert %{conn: %{state: :closed}} = mint_ws
     end
   end
 
@@ -163,5 +202,20 @@ defmodule FedecksClient.Websockets.MintWsTest do
   defp new(url) do
     {:ok, res} = MintWs.new(url, @device_id)
     res
+  end
+
+  defp connect_and_upgrade(ctx \\ %{}) do
+    {:ok, mint_ws} =
+      ctx
+      |> Map.get(:url, @test_url)
+      |> new()
+      |> MintWs.connect(%{"username" => "bob", "password" => "bob's password"})
+
+    assert_receive {:tcp, _socket, _} = upgrade_message
+
+    {:upgraded, mint_ws} = MintWs.handle_in(mint_ws, upgrade_message)
+
+    on_exit(fn -> MintWs.close(mint_ws) end)
+    mint_ws
   end
 end

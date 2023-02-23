@@ -1,4 +1,5 @@
 defmodule FedecksTestHandler do
+  @moduledoc false
   alias FedecksServer.FedecksHandler
   @behaviour FedecksHandler
 
@@ -25,6 +26,18 @@ defmodule FedecksTestHandler do
   @impl FedecksHandler
   def handle_info(_device_id, message) do
     {:push, message}
+  end
+
+  @impl FedecksHandler
+  def handle_in(_device_id, message) do
+    broadcast({:server_received, message})
+    :ok
+  end
+
+  @impl FedecksHandler
+  def handle_raw_in(_device_id, message) do
+    broadcast({:server_received_raw, message})
+    :ok
   end
 
   defp broadcast(msg) do
