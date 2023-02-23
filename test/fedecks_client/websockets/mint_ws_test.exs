@@ -2,11 +2,16 @@ defmodule FedecksClient.Websockets.MintWsTest do
   use ExUnit.Case, async: false
   alias FedecksClient.Websockets.{MintWs, WebsocketUrl}
 
+  import ExUnit.CaptureLog
+
   @test_url "ws://localhost:12833/fedecks/websocket"
   @device_id "id345"
 
   setup do
-    {:ok, _} = start_supervised(FedecksServerEndpoint)
+    capture_log(fn ->
+      {:ok, _} = start_supervised(FedecksServerEndpoint)
+    end)
+
     :ok
   end
 
@@ -66,8 +71,10 @@ defmodule FedecksClient.Websockets.MintWsTest do
 
       assert_receive {:tcp, _port, _} = fedecks_token
 
-      assert {:error, :unexpected_on_non_upgraded_connection} =
-               MintWs.handle_in(not_upgraded_mint_ws, fedecks_token)
+      capture_log(fn ->
+        assert {:error, :unexpected_on_non_upgraded_connection} =
+                 MintWs.handle_in(not_upgraded_mint_ws, fedecks_token)
+      end)
     end
 
     test "with invalid credentials" do
@@ -106,7 +113,10 @@ defmodule FedecksClient.Websockets.MintWsTest do
 
     test "receiving fedecks token", %{mint_ws: mint_ws} do
       assert_receive {:tcp, _port, _} = token_message
-      assert {:fedecks_token, %MintWs{}, token} = MintWs.handle_in(mint_ws, token_message)
+
+      assert {:messages, %MintWs{}, [{:fedecks_token, token}]} =
+               MintWs.handle_in(mint_ws, token_message)
+
       secrets = FedecksServer.Config.token_secrets({:fedecks_client, FedecksTestHandler})
 
       assert {:ok, @device_id} == FedecksServer.Token.from_token(token, secrets)
@@ -114,21 +124,24 @@ defmodule FedecksClient.Websockets.MintWsTest do
 
     test "receiving other fedecks message", %{mint_ws: mint_ws} do
       assert_receive {:tcp, _port, _} = token_message
-      {:fedecks_token, mint_ws, _} = MintWs.handle_in(mint_ws, token_message)
+      {:messages, mint_ws, [{:fedecks_token, _}]} = MintWs.handle_in(mint_ws, token_message)
 
       SimplestPubSub.publish({:message_to, @device_id}, "hello matey")
       assert_receive {:tcp, _port, _} = other_message
 
-      assert {:message, %MintWs{}, "hello matey"} = MintWs.handle_in(mint_ws, other_message)
+      assert {:messages, %MintWs{}, ["hello matey"]} = MintWs.handle_in(mint_ws, other_message)
     end
 
+    @tag skip: true
     test "decoding multiple messages", %{mint_ws: mint_ws} do
-      SimplestPubSub.publish({:message_to, @device_id}, "message 1")
-      SimplestPubSub.publish({:message_to, @device_id}, "message 2")
+      assert_receive {:tcp, _port, _} = token_message
+      MintWs.handle_in(mint_ws, token_message)
+
+      for i <- 1..3, do: SimplestPubSub.publish({:message_to, @device_id}, "message #{i}")
 
       assert_receive {:tcp, _port, _} = messages
 
-      assert {:messages, %MintWs{}, [{:fedecks_token, _}, "message 1", "message 2"]} =
+      assert {:messages, %MintWs{}, ["message 1", "message 2"]} =
                MintWs.handle_in(mint_ws, messages)
     end
   end

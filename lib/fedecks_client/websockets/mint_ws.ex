@@ -73,22 +73,13 @@ defmodule FedecksClient.Websockets.MintWs do
   end
 
   defp decode_fedecks_message(message) do
-    decoded =
-      message
-      # todo safe
-      |> :erlang.binary_to_term()
-      |> case do
-        {'token', token} -> {:fedecks_token, token}
-        msg -> msg
-      end
-  end
-
-  defp handle_fedecks_message({'token', token}) do
-    {:fedecks_token, token}
-  end
-
-  defp handle_fedecks_message(message) do
-    {:message, message}
+    message
+    # todo safe
+    |> :erlang.binary_to_term()
+    |> case do
+      {'token', token} -> {:fedecks_token, token}
+      msg -> msg
+    end
   end
 
   defp close(mint_ws, conn) do
