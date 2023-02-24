@@ -1,4 +1,4 @@
-defmodule FedecksClient.Websockets.MintWs do
+defmodule FedecksClient.Websockets.RealMintWs do
   @moduledoc """
   Handles Fedecks websockets via `Mint` and `Mint.WebSocket`
   """
@@ -37,6 +37,22 @@ defmodule FedecksClient.Websockets.MintWs do
     do_send(mint_ws, :erlang.term_to_binary('token_please'))
   end
 
+  @spec send_raw(
+          %{
+            :conn => Mint.HTTP.t(),
+            :ref => reference,
+            :websocket => Mint.WebSocket.t(),
+            optional(any) => any
+          },
+          binary
+        ) ::
+          {:ok,
+           %{
+             :conn => Mint.HTTP.t(),
+             :ref => reference,
+             :websocket => Mint.WebSocket.t(),
+             optional(any) => any
+           }}
   def send_raw(mint_ws, message) do
     do_send(mint_ws, message)
   end
