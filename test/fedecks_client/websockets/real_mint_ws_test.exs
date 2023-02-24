@@ -1,6 +1,6 @@
 defmodule FedecksClient.Websockets.RealMintWsTest do
   use ExUnit.Case, async: false
-  alias FedecksClient.Websockets.{RealMintWs, WebsocketUrl}
+  alias FedecksClient.Websockets.{MintWs, RealMintWs, WebsocketUrl}
 
   import ExUnit.CaptureLog
 
@@ -9,15 +9,29 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
 
   setup do
     capture_log(fn ->
-      {:ok, _} = start_supervised(FedecksServerEndpoint)
+      :ok = start_server()
     end)
 
     :ok
   end
 
+  defp start_server(count \\ 100)
+  defp start_server(0), do: flunk("could not start the server")
+
+  defp start_server(count) do
+    case start_supervised(FedecksServerEndpoint) do
+      {:ok, _} ->
+        :ok
+
+      _ ->
+        Process.sleep(10)
+        start_server(count - 1)
+    end
+  end
+
   describe "new" do
     test "with valid url" do
-      assert {:ok, %RealMintWs{ws_url: %WebsocketUrl{host: "localhost"}, device_id: "id123"}} =
+      assert {:ok, %MintWs{ws_url: %WebsocketUrl{host: "localhost"}, device_id: "id123"}} =
                RealMintWs.new(@test_url, "id123")
     end
 
@@ -31,7 +45,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
       %{ws_url: url} = mint_ws = new(@test_url)
 
       assert {:ok,
-              %RealMintWs{
+              %MintWs{
                 ws_url: ^url,
                 conn: %Mint.HTTP1{request: %{ref: ref}},
                 ref: ref,
@@ -54,7 +68,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
 
       assert {:upgraded, mint_ws} = RealMintWs.handle_in(mint_ws, mint_message)
 
-      assert %RealMintWs{ref: ^ref, websocket: %Mint.WebSocket{}} = mint_ws
+      assert %MintWs{ref: ^ref, websocket: %Mint.WebSocket{}} = mint_ws
       RealMintWs.close(mint_ws)
     end
 
@@ -107,20 +121,20 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
     end
 
     test "a message", %{mint_ws: mint_ws} do
-      {:ok, %RealMintWs{}} = RealMintWs.send(mint_ws, "hello matey")
+      {:ok, %MintWs{}} = RealMintWs.send(mint_ws, "hello matey")
       assert_receive {FedecksTestHandler, {:server_received, "hello matey"}}
     end
 
     test "a raw binary", %{mint_ws: mint_ws} do
-      {:ok, %RealMintWs{}} = RealMintWs.send_raw(mint_ws, "hello matey")
+      {:ok, %MintWs{}} = RealMintWs.send_raw(mint_ws, "hello matey")
       assert_receive {FedecksTestHandler, {:server_received_raw, "hello matey"}}
     end
 
     test "requesting a token", %{mint_ws: mint_ws} do
-      {:ok, %RealMintWs{}} = RealMintWs.request_token(mint_ws)
+      {:ok, %MintWs{}} = RealMintWs.request_token(mint_ws)
       assert_receive {:tcp, _socket, _} = token_message
 
-      assert {:messages, %RealMintWs{}, [{:fedecks_token, token}]} =
+      assert {:messages, %MintWs{}, [{:fedecks_token, token}]} =
                RealMintWs.handle_in(mint_ws, token_message)
 
       secrets = FedecksServer.Config.token_secrets({:fedecks_client, FedecksTestHandler})
@@ -140,7 +154,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
       SimplestPubSub.publish({:message_to, @device_id}, "hello matey")
       assert_receive {:tcp, _socket, _} = other_message
 
-      assert {:messages, %RealMintWs{}, ["hello matey"]} =
+      assert {:messages, %MintWs{}, ["hello matey"]} =
                RealMintWs.handle_in(mint_ws, other_message)
     end
 
@@ -148,7 +162,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
       %{conn: %{socket: socket}} = mint_ws
 
       # Can not reliably predict the number of frames received so here  a message is captured
-      assert {:messages, %RealMintWs{}, [{:fedecks_token, _}, "message 1", "message 2"]} =
+      assert {:messages, %MintWs{}, [{:fedecks_token, _}, "message 1", "message 2"]} =
                RealMintWs.handle_in(
                  %{mint_ws | websocket: %Mint.WebSocket{}},
                  {:tcp, socket,
@@ -170,7 +184,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
     test "bad messages ignored", %{mint_ws: mint_ws} do
       %{conn: %{socket: socket}} = mint_ws
 
-      assert {:messages, %RealMintWs{}, []} =
+      assert {:messages, %MintWs{}, []} =
                RealMintWs.handle_in(
                  %{mint_ws | websocket: %Mint.WebSocket{}},
                  {:tcp, socket, "lolnope"}
@@ -178,13 +192,11 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
     end
 
     test "errors handled", %{mint_ws: mint_ws} do
-      assert {:error, mint_ws, :unknown} =
+      assert {:error, :unknown} =
                RealMintWs.handle_in(
                  %{mint_ws | websocket: %Mint.WebSocket{}},
                  {:tcp, :erlang.list_to_port('#Port<0.9999>'), "lolnope"}
                )
-
-      assert %{conn: %{state: :closed}} = mint_ws
     end
   end
 
@@ -194,7 +206,7 @@ defmodule FedecksClient.Websockets.RealMintWsTest do
       |> new()
       |> RealMintWs.connect(%{"username" => "bob", "password" => "bob's password"})
 
-    assert {:ok, %RealMintWs{conn: %{state: :closed}}} = RealMintWs.close(mint_ws)
+    assert {:ok, %MintWs{conn: %{state: :closed}}} = RealMintWs.close(mint_ws)
   end
 
   test "closing an unopened connection is a no-op" do

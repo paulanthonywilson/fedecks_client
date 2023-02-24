@@ -2,20 +2,20 @@ defmodule FedecksClient.Websockets.RealMintWs do
   @moduledoc """
   Handles Fedecks websockets via `Mint` and `Mint.WebSocket`
   """
-  alias FedecksClient.Websockets.WebsocketUrl
+  alias FedecksClient.Websockets.{MintWs, WebsocketUrl}
 
-  required_keys = [:ws_url, :device_id]
-  @enforce_keys required_keys
-  defstruct [:websocket, :conn, :ref | required_keys]
+  @behaviour MintWs
 
+  @impl MintWs
   def new(url, device_id) do
     with {:ok, ws_url} <- WebsocketUrl.new(url) do
-      {:ok, %__MODULE__{ws_url: ws_url, device_id: device_id}}
+      {:ok, %MintWs{ws_url: ws_url, device_id: device_id}}
     end
   end
 
+  @impl MintWs
   def connect(
-        %__MODULE__{
+        %MintWs{
           ws_url: %{http_scheme: http_scheme, host: host, port: port, scheme: scheme, path: path}
         } = mint_ws,
         credentials
@@ -26,33 +26,24 @@ defmodule FedecksClient.Websockets.RealMintWs do
          {:ok, conn, ref} <-
            Mint.WebSocket.upgrade(scheme, conn, path, [{"x-fedecks-auth", auth}]) do
       {:ok, %{mint_ws | conn: conn, ref: ref}}
+    else
+      {:error, _} = err -> err
+      # todo - case called out by dialyzer but would be good to get a test in
+      {:error, _, reason} -> {:error, reason}
     end
   end
 
+  @impl MintWs
   def send(mint_ws, message) do
     do_send(mint_ws, :erlang.term_to_binary(message))
   end
 
+  @impl MintWs
   def request_token(mint_ws) do
     do_send(mint_ws, :erlang.term_to_binary('token_please'))
   end
 
-  @spec send_raw(
-          %{
-            :conn => Mint.HTTP.t(),
-            :ref => reference,
-            :websocket => Mint.WebSocket.t(),
-            optional(any) => any
-          },
-          binary
-        ) ::
-          {:ok,
-           %{
-             :conn => Mint.HTTP.t(),
-             :ref => reference,
-             :websocket => Mint.WebSocket.t(),
-             optional(any) => any
-           }}
+  @impl MintWs
   def send_raw(mint_ws, message) do
     do_send(mint_ws, message)
   end
@@ -63,11 +54,13 @@ defmodule FedecksClient.Websockets.RealMintWs do
          {:ok, conn} <- Mint.WebSocket.stream_request_body(conn, ref, data) do
       {:ok, %{mint_ws | conn: conn, websocket: websocket}}
     else
-      err ->
-        raise inspect(err)
+      {:error, _, reason} -> {:error, reason}
     end
   end
 
+  # todo - big empty messages
+  # todo - non fedecks responses (not binary term, pretend binary term)
+  @impl MintWs
   def handle_in(%{conn: conn, ref: ref, websocket: nil} = mint_ws, message) do
     case Mint.WebSocket.stream(conn, message) do
       {:ok, conn,
@@ -80,9 +73,18 @@ defmodule FedecksClient.Websockets.RealMintWs do
         close(mint_ws, conn)
         {:upgrade_error, status_code}
 
-      {:ok, conn, s} ->
+      {:ok, conn, _} ->
         close(mint_ws, conn)
         {:error, :unexpected_on_non_upgraded_connection}
+
+      # todo - can I provoke these?
+      {:error, _, err, _} ->
+        close(mint_ws, conn)
+        {:error, err}
+
+      :unknown ->
+        close(mint_ws, conn)
+        {:error, :unkown}
     end
   end
 
@@ -92,8 +94,8 @@ defmodule FedecksClient.Websockets.RealMintWs do
         decode(%{mint_ws | conn: conn}, data)
 
       err ->
-        {:ok, mint_ws} = close(mint_ws)
-        {:error, mint_ws, err}
+        {:ok, _mint_ws} = close(mint_ws)
+        {:error, err}
     end
   end
 
@@ -119,9 +121,10 @@ defmodule FedecksClient.Websockets.RealMintWs do
     close(%{mint_ws | conn: conn})
   end
 
-  def close(%__MODULE__{conn: nil} = mint_ws), do: {:ok, mint_ws}
+  @impl MintWs
+  def close(%MintWs{conn: nil} = mint_ws), do: {:ok, mint_ws}
 
-  def close(%__MODULE__{conn: conn} = mint_ws) do
+  def close(%MintWs{conn: conn} = mint_ws) do
     {:ok, conn} = Mint.HTTP.close(conn)
     {:ok, %{mint_ws | conn: conn}}
   end
