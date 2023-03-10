@@ -2,14 +2,11 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
   @moduledoc """
   Handles Fedecks websockets via `Mint` and `Mint.WebSocket`
   """
-  alias FedecksClient.Websockets.MintWsConnection
-  alias FedecksClient.Websockets.{MintWs, WebsocketUrl}
+  alias FedecksClient.Websockets.{MintWs, MintWsConnection}
 
   @behaviour MintWsConnection
 
-  @impl MintWs
-
-  @impl MintWs
+  @impl MintWsConnection
   def connect(
         %MintWs{
           ws_url: %{http_scheme: http_scheme, host: host, port: port, scheme: scheme, path: path}
@@ -28,17 +25,17 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
     end
   end
 
-  @impl MintWs
+  @impl MintWsConnection
   def send(mint_ws, message) do
     do_send(mint_ws, :erlang.term_to_binary(message))
   end
 
-  @impl MintWs
+  @impl MintWsConnection
   def request_token(mint_ws) do
     do_send(mint_ws, :erlang.term_to_binary('token_please'))
   end
 
-  @impl MintWs
+  @impl MintWsConnection
   def send_raw(mint_ws, message) do
     do_send(mint_ws, message)
   end
@@ -53,7 +50,7 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
     end
   end
 
-  @impl MintWs
+  @impl MintWsConnection
   def handle_in(%{conn: conn, ref: ref, websocket: nil} = mint_ws, message) do
     case Mint.WebSocket.stream(conn, message) do
       {:ok, conn,
@@ -127,7 +124,7 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
     close(%{mint_ws | conn: conn})
   end
 
-  @impl MintWs
+  @impl MintWsConnection
   def close(%MintWs{conn: nil} = mint_ws), do: {:ok, mint_ws}
 
   def close(%MintWs{conn: conn} = mint_ws) do

@@ -61,6 +61,7 @@ defmodule FedecksClient.Websockets.RealMintWsConnectionTest do
       assert mint_data =~ "Switching Protocols"
 
       assert {:upgraded, mint_ws} = RealMintWsConnection.handle_in(mint_ws, mint_message)
+      flunk(inspect(ref))
 
       assert %MintWs{ref: ^ref, websocket: %Mint.WebSocket{}} = mint_ws
       RealMintWsConnection.close(mint_ws)

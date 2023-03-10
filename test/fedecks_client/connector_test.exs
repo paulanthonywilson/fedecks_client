@@ -1,13 +1,11 @@
 defmodule FedecksClient.ConnectorTest do
-  use FedecksCase, async: false
-  alias FedecksClient.{Connector, TokenStore}
+  use FedecksCase, async: true
+  alias FedecksClient.{Connector, TokenStore, Websockets.MintWs}
 
   import Mox
-  alias FedecksClient.Websockets.MintWs
   setup :verify_on_exit!
 
   @connection_url "wss://example.com/fedecks/websocket"
-  @credentials %{"username" => "marvin", "password" => "paranoid-android"}
   @device_id "nerves123"
 
   setup %{name: name} do
@@ -24,35 +22,146 @@ defmodule FedecksClient.ConnectorTest do
   describe "starting up" do
     test "connector is named in the global registry", %{connector_name: connector_name} = ctx do
       {:ok, _} = start(ctx)
-      # assert Process.whereis(connector_name)
-    end
-
-    test "does not attempt connect if no token is configured",
-         %{name: name, connector_name: connector_name} = ctx do
-      {:ok, _} = start(ctx)
-      assert_receive {^name, :unregistered}
-      assert :unregistered == Connector.connection_status(connector_name)
+      assert Process.whereis(connector_name)
     end
 
     test "fails to start if the connection url is invalid", ctx do
       assert {:error, _} = start(%{ctx | connection_url: "http://example.com/wrongprotocol"})
     end
+  end
+
+  describe "on init" do
+    # calling the `init/1` callback directly here as we want to establish the
+    # behaviour of scheduling a connection with a scheduled message. Zooming out
+    # to encompass the `handle_info/2` is problematic with the timing `Mox.allow/1`
+    # and actions that take part as part of process initiation.
+    #
+    # I don't like using Mox in global mode even though async tests are not going to
+    # be an issue in this small library. I like to exercise techniques that avoid that
+    # cop-out so they can be deployed in bigger projects.
+    #
+    # Judge all you like, it's my party!
+
+    test "does not attempt connect if no token is configured",
+         %{name: name} = ctx do
+      {:ok, _} = start(ctx)
+
+      assert {:ok, %Connector{connection_status: :unregistered}} =
+               ctx |> Map.to_list() |> Connector.init()
+
+      assert_receive {^name, :unregistered}
+      refute_receive :attempt_connection
+    end
 
     test "schedules an attempt at connection if there is a token configured",
-         %{connector_name: connector_name, name: name, token_store: token_store} = ctx do
+         %{name: name, token_store: token_store} = ctx do
       TokenStore.set_token(token_store, "a pretend token")
 
-      expect(MockMintWs, :connect, fn %MintWs{}, credentials_used ->
-        %{"fedecks-token" => "a pretend token"} == credentials_used
+      assert {:ok, %Connector{connection_status: :connection_scheduled}} =
+               %{ctx | connect_delay: 1}
+               |> Map.to_list()
+               |> Connector.init()
+
+      assert_receive {^name, :connection_scheduled}
+      assert_receive {:attempt_connection, %{"fedecks-token" => "a pretend token"}}
+    end
+
+    test "connection attempt does not occur until scheduled", %{token_store: token_store} = ctx do
+      TokenStore.set_token(token_store, "a pretend token")
+
+      {:ok, %{connection_status: :connection_scheduled}} =
+        %{ctx | connect_delay: :timer.seconds(10)} |> Map.to_list() |> Connector.init()
+
+      refute_receive {:attempt_connection, _}
+    end
+  end
+
+  describe "on initiating connection" do
+    test "attempts to connect and upgrade", %{name: name} = ctx do
+      {:ok, pid} = start(ctx)
+
+      ref = :erlang.list_to_ref('#Ref<0.1.2.3>')
+
+      expect(MockMintWsConnection, :connect, fn mintws, credentials ->
+        assert %MintWs{device_id: @device_id} = mintws
+        assert %{"fedecks-token" => "a token"} = credentials
+        {:ok, %{mintws | ref: ref}}
       end)
 
-      {:ok, _} = start(%{ctx | connect_delay: 1})
+      send(pid, {:attempt_connection, %{"fedecks-token" => "a token"}})
+      assert %{mint_ws: %{ref: ^ref}} = :sys.get_state(pid)
       assert_receive {^name, :connecting}
-      assert :connecting = Connector.connection_status(connector_name)
+      assert :connecting = Connector.connection_status(pid)
     end
 
-    test "does not connect if token is configured, until after the delay" do
+    test "when connection fails, notifies listeners of failure and ", %{name: name} = ctx do
+      {:ok, pid} = start(ctx)
+
+      expect(MockMintWsConnection, :connect, fn _mintws, _credentials ->
+        {:error, "some failure"}
+      end)
+
+      send(pid, {:attempt_connection, %{"fedecks-token" => "a token"}})
+
+      assert_receive {^name, {:connection_failed, "some failure"}}
+      assert_receive {^name, :connection_scheduled}
+      assert :connection_scheduled = Connector.connection_status(pid)
     end
+
+    test "reschedules a new connection attempt on failure" do
+      credentials = %{"username" => "bob", "password" => "sue"}
+
+      stub(MockMintWsConnection, :connect, fn _, _ ->
+        {:error, "failure"}
+      end)
+
+      Connector.handle_info({:attempt_connection, credentials}, %Connector{
+        broadcast_topic: :some_name,
+        mint_ws: MintWs.new(@connection_url, "dev123"),
+        connect_delay: 1
+      })
+
+      assert_receive {:attempt_connection, ^credentials}
+    end
+
+    test "rescheduled new connection on failure is scheduled using the `connect_delay` value" do
+      stub(MockMintWsConnection, :connect, fn _, _ ->
+        {:error, "failure"}
+      end)
+
+      Connector.handle_info({:attempt_connection, %{}}, %Connector{
+        broadcast_topic: :some_name,
+        mint_ws: MintWs.new(@connection_url, "dev123"),
+        connect_delay: :timer.seconds(10)
+      })
+
+      refute_receive {:attempt_connection, _}
+    end
+  end
+
+  describe "receiving connection upgrade" do
+    test "if successful, notifies marks the connection upgraded", %{name: name} = ctx do
+      {:ok, pid} = start(ctx)
+      data_msg = {:tcp, :erlang.list_to_port('#Port<0.1234>'), "the data"}
+      send(pid, data_msg)
+      new_ref = :erlang.list_to_ref('#Ref<0.9.8.7>')
+
+      expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, data ->
+        assert data == data_msg
+        {:upgraded, %{mint_ws | ref: new_ref}}
+      end)
+
+      assert_receive {^name, :connected}
+      assert :connected = Connector.connection_status(pid)
+      assert %{mint_ws: %{ref: ^new_ref}} = :sys.get_state(pid)
+    end
+
+    @tag :skip
+    test "if upgrade error, notifies, blanks token, and marks as unregistered" do
+    end
+  end
+
+  describe "receiving messages" do
   end
 
   defp start(ctx) do
@@ -62,6 +171,7 @@ defmodule FedecksClient.ConnectorTest do
 
     case start_supervised({Connector, opts}) do
       {:ok, pid} ->
+        Mox.allow(MockMintWsConnection, self(), pid)
         {:ok, pid}
 
       err ->

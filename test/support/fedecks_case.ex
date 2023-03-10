@@ -11,9 +11,6 @@ defmodule FedecksCase do
     token_store_name = :"#{name}.TokenStore"
     {:ok, pid} = TokenStore.start_link({System.tmp_dir!(), token_store_name})
     %{filename: file} = :sys.get_state(pid)
-    Mox.set_mox_global()
-
-    Mox.stub_with(MockMintWs, StubMintWs) |> IO.inspect()
 
     on_exit(fn ->
       if file, do: File.rm(file)
