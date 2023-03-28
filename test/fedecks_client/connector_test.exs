@@ -108,7 +108,7 @@ defmodule FedecksClient.ConnectorTest do
       assert :connection_scheduled = Connector.connection_status(pid)
     end
 
-    test "reschedules a new connection attempt on failure" do
+    test "reschedules a new connection attempt on failure", %{token_store: token_store} do
       credentials = %{"username" => "bob", "password" => "sue"}
 
       stub(MockMintWsConnection, :connect, fn _, _ ->
@@ -116,6 +116,7 @@ defmodule FedecksClient.ConnectorTest do
       end)
 
       Connector.handle_info({:attempt_connection, credentials}, %Connector{
+        token_store: token_store,
         broadcast_topic: :some_name,
         mint_ws: MintWs.new(@connection_url, "dev123"),
         connect_delay: 1
@@ -130,6 +131,7 @@ defmodule FedecksClient.ConnectorTest do
       end)
 
       Connector.handle_info({:attempt_connection, %{}}, %Connector{
+        token_store: :some_store,
         broadcast_topic: :some_name,
         mint_ws: MintWs.new(@connection_url, "dev123"),
         connect_delay: :timer.seconds(10)
@@ -140,28 +142,134 @@ defmodule FedecksClient.ConnectorTest do
   end
 
   describe "receiving connection upgrade" do
-    test "if successful, notifies marks the connection upgraded", %{name: name} = ctx do
+    setup ctx do
       {:ok, pid} = start(ctx)
-      data_msg = {:tcp, :erlang.list_to_port('#Port<0.1234>'), "the data"}
-      send(pid, data_msg)
-      new_ref = :erlang.list_to_ref('#Ref<0.9.8.7>')
+      {:ok, connector: pid}
+    end
+
+    test "if successful, notifies marks the connection upgraded", %{name: name, connector: pid} do
+      data_msg = {:tcp, fake_socket(), "the data"}
+      new_ref = a_ref()
+      stub(MockMintWsConnection, :request_token, fn mint_ws -> {:ok, mint_ws} end)
 
       expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, data ->
         assert data == data_msg
         {:upgraded, %{mint_ws | ref: new_ref}}
       end)
 
+      send(pid, data_msg)
       assert_receive {^name, :connected}
       assert :connected = Connector.connection_status(pid)
       assert %{mint_ws: %{ref: ^new_ref}} = :sys.get_state(pid)
     end
 
-    @tag :skip
-    test "if upgrade error, notifies, blanks token, and marks as unregistered" do
+    test "requests token after upgrade", %{connector: pid} do
+      expect(MockMintWsConnection, :request_token, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+
+      upgrade_connection(pid)
+      process_all_gen_server_messages(pid)
+    end
+
+    test "if   errors, notifies, blanks token, and marks as unregistered", %{
+      name: name,
+      connector: pid
+    } do
+      stub(MockMintWsConnection, :handle_in, fn _, _ ->
+        {:error, :unknown}
+      end)
+
+      expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+
+      send(pid, {:tcp, fake_socket(), "blah blah"})
+      assert_receive {^name, {:upgrade_failed, :unknown}}
+      assert_receive {^name, :unregistered}
+      assert :unregistered = Connector.connection_status(pid)
+
+      assert %{mint_ws: nil} = :sys.get_state(pid)
+    end
+
+    test "if upgrade errors, notifies, blanks token, and marks as unregistered", %{
+      name: name,
+      connector: pid
+    } do
+      stub(MockMintWsConnection, :handle_in, fn _, _ ->
+        {:upgrade_error, :unknown}
+      end)
+
+      expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+
+      send(pid, {:tcp, fake_socket(), "blah blah"})
+      assert_receive {^name, {:upgrade_failed, :unknown}}
+      assert_receive {^name, :unregistered}
+      assert :unregistered = Connector.connection_status(pid)
+
+      assert %{mint_ws: nil} = :sys.get_state(pid)
     end
   end
 
   describe "receiving messages" do
+    setup ctx do
+      pid = start_upgraded_connection(ctx)
+      clear_process_inbox()
+      {:ok, connector: pid}
+    end
+
+    test "updates stored token when fedecks token received", %{
+      connector: pid,
+      token_store: token_store
+    } do
+      expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, {_, _, "yyy"} ->
+        {:messages, mint_ws, [{:fedecks_token, "a new token"}]}
+      end)
+
+      send(pid, {:tcp, fake_socket(), "yyy"})
+      process_all_gen_server_messages(pid)
+      assert "a new token" == TokenStore.token(token_store)
+    end
+
+    test "notifies listeners of every message", %{connector: pid, name: name} do
+      expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, {_, _, "yyy"} ->
+        {:messages, mint_ws, ["hello matey", %{"hello" => "matey"}]}
+      end)
+
+      send(pid, {:tcp, fake_socket(), "yyy"})
+      assert_receive {^name, {:message, "hello matey"}}
+      assert_receive {^name, {:message, %{"hello" => "matey"}}}
+    end
+
+    test "normal messages mixed with tokens are handled", %{
+      connector: pid,
+      name: name,
+      token_store: token_store
+    } do
+      expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, {_, _, "yyy"} ->
+        {:messages, mint_ws, ["hello matey", {:fedecks_token, "some token or other"}]}
+      end)
+
+      send(pid, {:tcp, fake_socket(), "yyy"})
+      assert_receive {^name, {:message, "hello matey"}}
+      assert "some token or other" == TokenStore.token(token_store)
+    end
+  end
+
+  defp start_upgraded_connection(ctx) do
+    {:ok, pid} = start(ctx)
+    upgrade_connection(pid)
+    pid
+  end
+
+  def upgrade_connection(pid) do
+    stub(MockMintWsConnection, :request_token, fn mint_ws -> {:ok, mint_ws} end)
+
+    expect(MockMintWsConnection, :handle_in, fn mint_ws, _ ->
+      {:upgraded,
+       %{mint_ws | ref: :erlang.list_to_ref('#Ref<0.1.2.3>'), websocket: %Mint.WebSocket{}}}
+    end)
+
+    send(pid, {:tcp, fake_socket(), "xxx"})
+
+    assert_receive {_, :connected}
+    pid
   end
 
   defp start(ctx) do
@@ -177,5 +285,15 @@ defmodule FedecksClient.ConnectorTest do
       err ->
         err
     end
+  end
+
+  defp fake_socket do
+    # Ports (or references) can't be attributes
+    # https://furlough.merecomplexities.com/elixir/2023/03/10/a-fun-but-trivial-limitation-in-exunit-macros.html
+    :erlang.list_to_port('#Port<0.1234>')
+  end
+
+  defp a_ref do
+    :erlang.list_to_ref('#Ref<0.1.2.8>')
   end
 end

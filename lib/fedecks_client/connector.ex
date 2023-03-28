@@ -11,7 +11,7 @@ defmodule FedecksClient.Connector do
   @type connection_status ::
           :unregistered | :connecting | :connection_scheduled | :failed_registration | :connected
 
-  keys = [:broadcast_topic, :mint_ws, :connect_delay]
+  keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store]
   @enforce_keys keys
 
   defstruct [:connection_status | keys]
@@ -43,6 +43,7 @@ defmodule FedecksClient.Connector do
     case MintWs.new(url, device_id) do
       {:ok, mint_ws} ->
         state = %__MODULE__{
+          token_store: token_store,
           broadcast_topic: Keyword.fetch!(args, :name),
           mint_ws: mint_ws,
           connect_delay: connect_delay
@@ -86,16 +87,49 @@ defmodule FedecksClient.Connector do
     {:noreply, state}
   end
 
+  def handle_info(:request_a_new_token, %{mint_ws: mint_ws} = state) do
+    {:ok, mint_ws} = MintWsConnection.request_token(mint_ws)
+    {:noreply, update_mint_ws(state, mint_ws)}
+  end
+
   def handle_info({:tcp, _socket, _data} = incomong, %{mint_ws: mint_ws} = state) do
     state =
-      case MockMintWsConnection.handle_in(mint_ws, incomong) do
+      case MintWsConnection.handle_in(mint_ws, incomong) do
         {:upgraded, mint_ws} ->
+          send(self(), :request_a_new_token)
+
           state
           |> update_mint_ws(mint_ws)
           |> new_connection_status(:connected)
+
+        {:messages, mint_ws, messages} ->
+          state
+          |> handle_messages(messages)
+          |> update_mint_ws(mint_ws)
+
+        {err, reason} when err in [:error, :upgrade_error] ->
+          {:ok, _mint_ws} = MintWsConnection.close(mint_ws)
+          broadcast(state, {:upgrade_failed, reason})
+
+          state
+          |> update_mint_ws(nil)
+          |> new_connection_status(:unregistered)
       end
 
     {:noreply, state}
+  end
+
+  defp handle_messages(state, messages) do
+    Enum.map(messages, &handle_one_message(state, &1))
+    state
+  end
+
+  defp handle_one_message(%{token_store: token_store}, {:fedecks_token, token}) do
+    TokenStore.set_token(token_store, token)
+  end
+
+  defp handle_one_message(state, message) do
+    broadcast(state, {:message, message})
   end
 
   defp schedule_connection(%{connect_delay: connect_delay} = state, credentials) do
@@ -117,7 +151,7 @@ defmodule FedecksClient.Connector do
     %{state | connection_status: connection_status}
   end
 
-  defp update_mint_ws(%__MODULE__{} = state, %MintWs{} = mint_ws) do
+  defp update_mint_ws(%__MODULE__{} = state, mint_ws) do
     %{state | mint_ws: mint_ws}
   end
 end

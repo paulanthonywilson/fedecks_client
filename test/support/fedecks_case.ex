@@ -6,6 +6,12 @@ defmodule FedecksCase do
 
   alias FedecksClient.TokenStore
 
+  using do
+    quote do
+      import FedecksHelpers
+    end
+  end
+
   setup do
     name = String.to_atom("#{:rand.uniform(999)}-#{inspect(self())}")
     token_store_name = :"#{name}.TokenStore"

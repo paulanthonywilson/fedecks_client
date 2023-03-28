@@ -59,20 +59,16 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
 
         {:upgraded, %{mint_ws | conn: conn, websocket: websocket}}
 
-      {:ok, conn, [{:status, ^ref, status_code}, {:headers, ^ref, _}, {:done, ^ref}]} ->
-        close(mint_ws, conn)
+      {:ok, _conn, [{:status, ^ref, status_code}, {:headers, ^ref, _}, {:done, ^ref}]} ->
         {:upgrade_error, status_code}
 
-      {:ok, conn, _} ->
-        close(mint_ws, conn)
+      {:ok, _conn, _} ->
         {:error, :unexpected_on_non_upgraded_connection}
 
       {:error, _, err, _} ->
-        close(mint_ws, conn)
         {:error, err}
 
       :unknown ->
-        close(mint_ws, conn)
         {:error, :unkown}
     end
   end
@@ -83,7 +79,6 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
         decode(%{mint_ws | conn: conn}, data)
 
       err ->
-        {:ok, _mint_ws} = close(mint_ws)
         {:error, err}
     end
   end
@@ -119,10 +114,6 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
   end
 
   defp safe_decode(_), do: :error
-
-  defp close(mint_ws, conn) do
-    close(%{mint_ws | conn: conn})
-  end
 
   @impl MintWsConnection
   def close(%MintWs{conn: nil} = mint_ws), do: {:ok, mint_ws}

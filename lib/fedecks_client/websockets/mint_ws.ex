@@ -1,6 +1,6 @@
 defmodule FedecksClient.Websockets.MintWs do
   @moduledoc """
-  Testing seam for interactions with `Mint`/``MintWebsocket`.
+  Holds a MintWs connection and associated  websocket and Fedecks inforrmation.
 
   Note the functional approach taken by `Mint` - each operation returns a copy of this struct,
   updated (probably) by the operation.
@@ -14,19 +14,6 @@ defmodule FedecksClient.Websockets.MintWs do
 
   alias FedecksClient.Websockets.WebsocketUrl
 
-  defmacro __using__(_) do
-    impl =
-      if apply(Mix, :env, []) == :test and apply(Mix, :target, []) != :elixir_ls do
-        MockMintWs
-      else
-        FedecksClient.Websockets.RealMintWs
-      end
-
-    quote do
-      alias unquote(impl), as: MintWs
-    end
-  end
-
   required_keys = [:ws_url, :device_id]
   @enforce_keys required_keys
   defstruct [:websocket, :conn, :ref | required_keys]
@@ -34,8 +21,9 @@ defmodule FedecksClient.Websockets.MintWs do
   @type t :: %__MODULE__{
           ws_url: FedecksClient.Websockets.WebsocketUrl.t(),
           device_id: String.t(),
-          conn: Mint.HTTP.t(),
-          ref: reference()
+          websocket: nil | Mint.WebSocket.t(),
+          conn: nil | Mint.HTTP.t(),
+          ref: nil | reference()
         }
 
   @doc """

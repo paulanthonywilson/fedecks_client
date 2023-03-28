@@ -61,13 +61,12 @@ defmodule FedecksClient.Websockets.RealMintWsConnectionTest do
       assert mint_data =~ "Switching Protocols"
 
       assert {:upgraded, mint_ws} = RealMintWsConnection.handle_in(mint_ws, mint_message)
-      flunk(inspect(ref))
 
       assert %MintWs{ref: ^ref, websocket: %Mint.WebSocket{}} = mint_ws
       RealMintWsConnection.close(mint_ws)
     end
 
-    test "can not  process ugrade message when already upgraded" do
+    test "can not  process non-ugrade message when not upgraded" do
       {:ok, not_upgraded_mint_ws} =
         @test_url
         |> new()
@@ -129,7 +128,7 @@ defmodule FedecksClient.Websockets.RealMintWsConnectionTest do
       assert_receive {FedecksTestHandler, {:server_received_raw, "hello matey"}}
     end
 
-    test "requesting a token", %{mint_ws: mint_ws} do
+    test "requesting and receiving a token", %{mint_ws: mint_ws} do
       {:ok, %MintWs{}} = RealMintWsConnection.request_token(mint_ws)
       assert_receive {:tcp, _socket, _} = token_message
 

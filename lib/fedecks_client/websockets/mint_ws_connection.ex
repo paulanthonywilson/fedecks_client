@@ -10,15 +10,14 @@ defmodule FedecksClient.Websockets.MintWsConnection do
   those messages, which are of the form `{:tcp, socket :: port(), data :: String.t()}`.
   """
 
+  alias FedecksClient.CompileEnv
   alias FedecksClient.Websockets.MintWs
 
   defmacro __using__(_) do
     impl =
-      if apply(Mix, :env, []) == :test and apply(Mix, :target, []) != :elixir_ls do
-        MockMintWsConnection
-      else
-        FedecksClient.Websockets.RealMintWsConnection
-      end
+      if CompileEnv.test?(),
+        do: MockMintWsConnection,
+        else: FedecksClient.Websockets.RealMintWsConnection
 
     quote do
       alias unquote(impl), as: MintWsConnection
@@ -41,8 +40,9 @@ defmodule FedecksClient.Websockets.MintWsConnection do
 
   Upgrades populate's the returned struct's websocket field
   """
-  @callback handle_in(MintWs.t(), message :: {:tcp, socket :: port(), data :: String.MintWs.t()}) ::
-              {:ok, MintWs.t()}
+  @callback handle_in(MintWs.t(), message :: {:tcp, socket :: port(), data :: binary()}) ::
+              {:messages, MintWs.t(), list(term())}
+              | {:upgraded, MintWs.t()}
               | {:upgrade_error, status_code :: integer()}
               | {:error, Mint.Types.error() | :unknown}
 
