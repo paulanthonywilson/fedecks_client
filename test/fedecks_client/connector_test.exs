@@ -7,16 +7,22 @@ defmodule FedecksClient.ConnectorTest do
 
   @connection_url "wss://example.com/fedecks/websocket"
   @device_id "nerves123"
-
+  @defaults %{
+    connection_url: @connection_url,
+    connect_delay: :timer.seconds(1),
+    ping_frequency: :timer.seconds(30),
+    device_id: @device_id
+  }
   setup %{name: name} do
     SimplestPubSub.subscribe(name)
     connector_name = :"#{name}.Connector"
 
-    {:ok,
-     connector_name: connector_name,
-     connection_url: @connection_url,
-     connect_delay: :timer.seconds(1),
-     device_id: @device_id}
+    {:ok, Map.put(@defaults, :connector_name, connector_name)}
+  end
+
+  setup do
+    stub(MockMintWsConnection, :ping, fn mint_ws -> {:ok, mint_ws} end)
+    :ok
   end
 
   describe "starting up" do
@@ -108,19 +114,17 @@ defmodule FedecksClient.ConnectorTest do
       assert :connection_scheduled = Connector.connection_status(pid)
     end
 
-    test "reschedules a new connection attempt on failure", %{token_store: token_store} do
+    test "reschedules a new connection attempt on failure" do
       credentials = %{"username" => "bob", "password" => "sue"}
 
       stub(MockMintWsConnection, :connect, fn _, _ ->
         {:error, "failure"}
       end)
 
-      Connector.handle_info({:attempt_connection, credentials}, %Connector{
-        token_store: token_store,
-        broadcast_topic: :some_name,
-        mint_ws: MintWs.new(@connection_url, "dev123"),
-        connect_delay: 1
-      })
+      Connector.handle_info(
+        {:attempt_connection, credentials},
+        connector_state(%{connect_delay: 1})
+      )
 
       assert_receive {:attempt_connection, ^credentials}
     end
@@ -130,12 +134,10 @@ defmodule FedecksClient.ConnectorTest do
         {:error, "failure"}
       end)
 
-      Connector.handle_info({:attempt_connection, %{}}, %Connector{
-        token_store: :some_store,
-        broadcast_topic: :some_name,
-        mint_ws: MintWs.new(@connection_url, "dev123"),
-        connect_delay: :timer.seconds(10)
-      })
+      Connector.handle_info(
+        {:attempt_connection, %{}},
+        connector_state(%{connect_delay: :timer.seconds(60)})
+      )
 
       refute_receive {:attempt_connection, _}
     end
@@ -252,6 +254,65 @@ defmodule FedecksClient.ConnectorTest do
     end
   end
 
+  describe "send messages" do
+    # todo
+  end
+
+  describe "pinging" do
+    setup do
+      stub(MockMintWsConnection, :handle_in, fn mint_ws, {:tcp, _, "upgrade"} ->
+        {:upgraded, mint_ws}
+      end)
+
+      :ok
+    end
+
+    test "schedules pings on upgrade" do
+      Connector.handle_info(
+        {:tcp, fake_socket(), "upgrade"},
+        connector_state(%{ping_frequency: 1})
+      )
+
+      assert_receive :ping
+    end
+
+    test "pinging sends a ping and reschedules" do
+      expect(MockMintWsConnection, :ping, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+      Connector.handle_info(:ping, connector_state(%{ping_frequency: 1}))
+
+      assert_receive :ping
+    end
+
+    test "pinging on scheduled using the ping frequency " do
+      Connector.handle_info(
+        {:tcp, fake_socket(), "upgrade"},
+        connector_state(%{ping_frequency: 5_000})
+      )
+
+      refute_receive :ping
+      Connector.handle_info(:ping, connector_state(%{ping_frequency: 5_000}))
+      refute_receive :ping
+    end
+  end
+
+  describe "disconnection" do
+    setup ctx do
+      pid = start_upgraded_connection(ctx)
+      clear_process_inbox()
+      {:ok, connector: pid}
+    end
+
+    test "notifies listeners", %{name: name, connector: pid} do
+      send(pid, {:tcp_closed, fake_socket()})
+      assert_receive {^name, :connection_lost}
+    end
+
+    test "exits the genserver normally", %{connector: pid} do
+      assert {:stop, :normal, _} =
+               Connector.handle_info({:tcp_closed, fake_socket()}, :sys.get_state(pid))
+    end
+  end
+
   defp start_upgraded_connection(ctx) do
     {:ok, pid} = start(ctx)
     upgrade_connection(pid)
@@ -295,5 +356,18 @@ defmodule FedecksClient.ConnectorTest do
 
   defp a_ref do
     :erlang.list_to_ref('#Ref<0.1.2.8>')
+  end
+
+  defp connector_state(args) do
+    broadcast_topic = Map.get(args, :name, :some_topic)
+    {:ok, mint_ws} = MintWs.new(@connection_url, @device_id)
+
+    %{
+      connection_status: :connecting,
+      broadcast_topic: broadcast_topic,
+      mint_ws: mint_ws
+    }
+    |> Enum.into(args)
+    |> Map.put(:__struct__, Connector)
   end
 end

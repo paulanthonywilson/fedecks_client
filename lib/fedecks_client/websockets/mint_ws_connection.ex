@@ -54,6 +54,16 @@ defmodule FedecksClient.Websockets.MintWsConnection do
   @callback send(MintWs.t(), message :: term()) :: {:ok, MintWs.t()} | {:error, reason :: term()}
 
   @doc """
+  Send a ping.
+
+  The client is responsible for periodic pinging as the automatic pong response is handled by
+  the socket in FedecksServer, whereas we would have to implement it ourselves in the client.
+
+  (Pong responses not supported)
+  """
+  @callback ping(MintWs.t()) :: {:ok, MintWs.t()} | {:error, reason :: term()}
+
+  @doc """
   Sends the raw binary to the server
   """
   @callback send_raw(MintWs.t(), binary()) :: {:ok, MintWs.t()} | {:error, reason :: term()}

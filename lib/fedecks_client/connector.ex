@@ -11,7 +11,7 @@ defmodule FedecksClient.Connector do
   @type connection_status ::
           :unregistered | :connecting | :connection_scheduled | :failed_registration | :connected
 
-  keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store]
+  keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store, :ping_frequency]
   @enforce_keys keys
 
   defstruct [:connection_status | keys]
@@ -39,6 +39,7 @@ defmodule FedecksClient.Connector do
     device_id = Keyword.fetch!(args, :device_id)
     token_store = Keyword.fetch!(args, :token_store)
     connect_delay = Keyword.fetch!(args, :connect_delay)
+    ping_frequency = Keyword.fetch!(args, :ping_frequency)
 
     case MintWs.new(url, device_id) do
       {:ok, mint_ws} ->
@@ -46,7 +47,8 @@ defmodule FedecksClient.Connector do
           token_store: token_store,
           broadcast_topic: Keyword.fetch!(args, :name),
           mint_ws: mint_ws,
-          connect_delay: connect_delay
+          connect_delay: connect_delay,
+          ping_frequency: ping_frequency
         }
 
         state =
@@ -70,6 +72,7 @@ defmodule FedecksClient.Connector do
     {:reply, connection_status, state}
   end
 
+  # Handling scheduling messages
   @impl GenServer
   def handle_info({:attempt_connection, credentials}, %{mint_ws: mint_ws} = state) do
     state = new_connection_status(state, :connecting)
@@ -92,13 +95,26 @@ defmodule FedecksClient.Connector do
     {:noreply, update_mint_ws(state, mint_ws)}
   end
 
-  def handle_info({:tcp, _socket, _data} = incomong, %{mint_ws: mint_ws} = state) do
+  def handle_info(:ping, %{mint_ws: mint_ws} = state) do
+    {:ok, mint_ws} = MintWsConnection.ping(mint_ws)
+
     state =
-      case MintWsConnection.handle_in(mint_ws, incomong) do
+      state
+      |> update_mint_ws(mint_ws)
+      |> schedule_ping()
+
+    {:noreply, state}
+  end
+
+  # Handling connection messages
+  def handle_info({:tcp, _socket, _data} = incoming, %{mint_ws: mint_ws} = state) do
+    state =
+      case MintWsConnection.handle_in(mint_ws, incoming) do
         {:upgraded, mint_ws} ->
           send(self(), :request_a_new_token)
 
           state
+          |> schedule_ping()
           |> update_mint_ws(mint_ws)
           |> new_connection_status(:connected)
 
@@ -119,8 +135,15 @@ defmodule FedecksClient.Connector do
     {:noreply, state}
   end
 
+  def handle_info({:tcp_closed, _socket}, state) do
+    broadcast(state, :connection_lost)
+    # Socket's closed so let's just "let it die" and let the supervisor deal with
+    # reconnection logic.
+    {:stop, :normal, state}
+  end
+
   defp handle_messages(state, messages) do
-    Enum.map(messages, &handle_one_message(state, &1))
+    Enum.each(messages, &handle_one_message(state, &1))
     state
   end
 
@@ -130,6 +153,11 @@ defmodule FedecksClient.Connector do
 
   defp handle_one_message(state, message) do
     broadcast(state, {:message, message})
+  end
+
+  defp schedule_ping(%{ping_frequency: ping_frequency} = state) do
+    Process.send_after(self(), :ping, ping_frequency)
+    state
   end
 
   defp schedule_connection(%{connect_delay: connect_delay} = state, credentials) do

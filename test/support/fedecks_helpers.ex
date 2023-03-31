@@ -1,4 +1,5 @@
 defmodule FedecksHelpers do
+  @moduledoc false
   import ExUnit.Assertions
 
   @doc """

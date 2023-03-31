@@ -36,6 +36,17 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
   end
 
   @impl MintWsConnection
+  def ping(%{conn: conn, websocket: websocket, ref: ref, device_id: device_id} = mint_ws) do
+    with {:ok, websocket, data} <-
+           Mint.WebSocket.encode(websocket, {:ping, device_id}),
+         {:ok, conn} <- Mint.WebSocket.stream_request_body(conn, ref, data) do
+      {:ok, %{mint_ws | conn: conn, websocket: websocket}}
+    else
+      {:error, _, reason} -> {:error, reason}
+    end
+  end
+
+  @impl MintWsConnection
   def send_raw(mint_ws, message) do
     do_send(mint_ws, message)
   end

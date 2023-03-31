@@ -242,6 +242,32 @@ defmodule FedecksClient.Websockets.RealMintWsConnectionTest do
     end
   end
 
+  describe "ping" do
+    test "does send a ping with the device id" do
+      mint_ws = connect_and_upgrade()
+      assert {:ok, %MintWs{}} = RealMintWsConnection.ping(mint_ws)
+
+      assert_receive {:tcp, _socket, pong}
+
+      assert <<138, 5>> <> @device_id == pong
+    end
+
+    test "errors if fails to ping" do
+      mint_ws = connect_and_upgrade()
+      RealMintWsConnection.close(mint_ws)
+      assert {:error, _} = RealMintWsConnection.ping(mint_ws)
+    end
+  end
+
+  test "pongs are do not become messages" do
+    mint_ws = connect_and_upgrade()
+
+    %{conn: %{socket: socket}} = mint_ws
+
+    assert {:messages, %MintWs{}, []} =
+             RealMintWsConnection.handle_in(mint_ws, {:tcp, socket, <<138, 5>> <> @device_id})
+  end
+
   test "closing" do
     {:ok, mint_ws} =
       @test_url
