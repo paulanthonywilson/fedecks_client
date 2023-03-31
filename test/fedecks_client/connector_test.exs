@@ -254,8 +254,54 @@ defmodule FedecksClient.ConnectorTest do
     end
   end
 
-  describe "send messages" do
-    # todo
+  describe "sending" do
+    setup ctx do
+      {:ok, connector: start_upgraded_connection(ctx)}
+    end
+
+    test "a normal message, sends a normal message", %{connector: pid} do
+      expect(MockMintWsConnection, :send, fn %MintWs{} = mint_ws, {"hello", "matey"} ->
+        {:ok, mint_ws}
+      end)
+
+      assert :ok = Connector.send_message(pid, {"hello", "matey"})
+      process_all_gen_server_messages(pid)
+    end
+
+    test "closes connection on normal sending error", %{connector: pid, name: name} do
+      expect(MockMintWsConnection, :send, fn %MintWs{}, {"hello", "matey"} ->
+        {:error, "an error"}
+      end)
+
+      expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+
+      assert :ok = Connector.send_message(pid, {"hello", "matey"})
+      process_all_gen_server_messages(pid)
+
+      assert_receive {^name, {:connection_error, "an error"}}
+    end
+
+    test "a raw messages, sends a raw message", %{connector: pid} do
+      expect(MockMintWsConnection, :send_raw, fn %MintWs{} = mint_ws, "hello matey" ->
+        {:ok, mint_ws}
+      end)
+
+      assert :ok = Connector.send_raw_message(pid, "hello matey")
+      process_all_gen_server_messages(pid)
+    end
+
+    test "closes connection on raw sending error", %{connector: pid, name: name} do
+      expect(MockMintWsConnection, :send_raw, fn %MintWs{}, "hello matey" ->
+        {:error, "another error"}
+      end)
+
+      expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
+
+      assert :ok = Connector.send_raw_message(pid, "hello matey")
+      process_all_gen_server_messages(pid)
+
+      assert_receive {^name, {:connection_error, "another error"}}
+    end
   end
 
   describe "pinging" do

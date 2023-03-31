@@ -29,8 +29,28 @@ defmodule FedecksClient.Connector do
     GenServer.start_link(__MODULE__, args, name: name)
   end
 
+  @doc """
+  The current connection status
+  """
+  @spec connection_status(GenServer.server()) :: connection_status()
   def connection_status(server) do
     GenServer.call(server, :connection_status)
+  end
+
+  @doc """
+  Send a message as any Erlang term to the server
+  """
+  @spec send_message(GenServer.server(), term()) :: :ok
+  def send_message(server, message) do
+    GenServer.cast(server, {:send_message, message})
+  end
+
+  @doc """
+  Send an unencoded binary messagaas any to the server
+  """
+  @spec send_raw_message(GenServer.server(), binary()) :: :ok
+  def send_raw_message(server, message) do
+    GenServer.cast(server, {:send_raw_message, message})
   end
 
   @impl GenServer
@@ -65,6 +85,30 @@ defmodule FedecksClient.Connector do
       {:error, reason} ->
         {:stop, reason}
     end
+  end
+
+  @impl GenServer
+  def handle_cast({:send_message, message}, %{mint_ws: mint_ws} = state) do
+    mint_ws
+    |> MintWsConnection.send(message)
+    |> handle_message_send_result(state)
+  end
+
+  @impl GenServer
+  def handle_cast({:send_raw_message, message}, %{mint_ws: mint_ws} = state) do
+    mint_ws
+    |> MintWsConnection.send_raw(message)
+    |> handle_message_send_result(state)
+  end
+
+  defp handle_message_send_result({:ok, mint_ws}, state) do
+    {:noreply, update_mint_ws(state, mint_ws)}
+  end
+
+  defp handle_message_send_result({:error, reason}, %{mint_ws: mint_ws} = state) do
+    broadcast(state, {:connection_error, reason})
+    {:ok, mint_ws} = MintWsConnection.close(mint_ws)
+    {:noreply, update_mint_ws(state, mint_ws)}
   end
 
   @impl GenServer
