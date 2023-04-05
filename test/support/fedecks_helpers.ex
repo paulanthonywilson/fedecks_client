@@ -21,11 +21,14 @@ defmodule FedecksHelpers do
     end
   end
 
+  def generate_unique_name do
+    String.to_atom("#{:rand.uniform(999)}-#{inspect(self())}")
+  end
+
   @doc """
   Avoid timing issues with casts and messages in a GenServer by waiting for the queue to empty.
   """
-  @spec process_all_gen_server_messages(atom() | pid() | {:global, any} | {:via, atom(), any()}) ::
-          :ok
+  @spec process_all_gen_server_messages(GenServer.server()) :: :ok
   def process_all_gen_server_messages(pid) do
     # Performed through a message to the GenServer so all previous messages must process before
     # this can return

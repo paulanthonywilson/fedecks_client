@@ -17,16 +17,20 @@ defmodule FedecksClient.Connector do
   defstruct [:connection_status | keys]
 
   @type t :: %__MODULE__{
-          broadcast_topic: atom(),
           connection_status: connection_status(),
+          broadcast_topic: atom(),
           mint_ws: FedecksClient.Websockets.MintWs.t(),
-          connect_delay: non_neg_integer()
+          connect_delay: pos_integer(),
+          token_store: atom(),
+          ping_frequency: pos_integer()
         }
+
+  def server_name(base_name), do: :"#{base_name}.Connector"
 
   @spec start_link(keyword) :: :ignore | {:error, any} | {:ok, pid}
   def start_link(args) do
-    name = Keyword.fetch!(args, :connector_name)
-    GenServer.start_link(__MODULE__, args, name: name)
+    base_name = Keyword.fetch!(args, :name)
+    GenServer.start_link(__MODULE__, args, name: server_name(base_name))
   end
 
   @doc """
@@ -212,11 +216,6 @@ defmodule FedecksClient.Connector do
   defp broadcast(%{broadcast_topic: topic}, message) do
     SimplestPubSub.publish(topic, {topic, message})
   end
-
-  # todo - test which forces this uncommenting (?)
-  # defp new_connection_status(%{connection_status: connection_status} = state, connection_status) do
-  #   state
-  # end
 
   defp new_connection_status(state, connection_status) do
     broadcast(state, connection_status)

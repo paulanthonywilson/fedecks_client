@@ -8,11 +8,11 @@ defmodule FedecksClient.TokenStoreTest do
     assert("my token" == TokenStore.token(token_store))
   end
 
-  test "persistence", %{token_store: token_store} do
+  test "persistence", %{token_store: token_store, name: name} do
     :ok = TokenStore.set_token(token_store, "my saved token")
     assert "my saved token" == TokenStore.token(token_store)
     ensure_killed(token_store)
-    {:ok, _pid} = TokenStore.start_link({System.tmp_dir(), token_store})
+    {:ok, _pid} = TokenStore.start_link(directory: System.tmp_dir(), name: name)
     assert "my saved token" == TokenStore.token(token_store)
   end
 

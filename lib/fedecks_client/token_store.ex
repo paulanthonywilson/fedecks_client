@@ -7,8 +7,13 @@ defmodule FedecksClient.TokenStore do
   defstruct [:filename, :token]
   @type t :: %__MODULE__{filename: String.t(), token: String.t()}
 
-  def start_link({_directory, name} = args) do
-    GenServer.start_link(__MODULE__, args, name: name)
+  def server_name(base_name), do: :"#{base_name}.TokenStore"
+
+  def start_link(opts) do
+    base_name = Keyword.fetch!(opts, :name)
+    name = server_name(base_name)
+    directory = Keyword.fetch!(opts, :directory)
+    GenServer.start_link(__MODULE__, {directory, name}, name: name)
   end
 
   def init({directory, name}) do

@@ -13,15 +13,14 @@ defmodule FedecksCase do
   end
 
   setup do
-    name = String.to_atom("#{:rand.uniform(999)}-#{inspect(self())}")
-    token_store_name = :"#{name}.TokenStore"
-    {:ok, pid} = TokenStore.start_link({System.tmp_dir!(), token_store_name})
+    name = FedecksHelpers.generate_unique_name()
+    {:ok, pid} = TokenStore.start_link(directory: System.tmp_dir!(), name: name)
     %{filename: file} = :sys.get_state(pid)
 
     on_exit(fn ->
       if file, do: File.rm(file)
     end)
 
-    {:ok, name: name, token_store: token_store_name}
+    {:ok, name: name, token_store: TokenStore.server_name(name)}
   end
 end

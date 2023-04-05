@@ -250,6 +250,8 @@ defmodule FedecksClient.ConnectorTest do
 
       send(pid, {:tcp, fake_socket(), "yyy"})
       assert_receive {^name, {:message, "hello matey"}}
+      process_all_gen_server_messages(token_store)
+
       assert "some token or other" == TokenStore.token(token_store)
     end
   end
