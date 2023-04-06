@@ -4,8 +4,10 @@ defmodule FedecksClient.TokenStore do
   """
   use GenServer
 
-  defstruct [:filename, :token]
-  @type t :: %__MODULE__{filename: String.t(), token: String.t()}
+  keys = [:directory, :filename, :token]
+  @enforce_keys keys
+  defstruct keys
+  @type t :: %__MODULE__{directory: String.t(), filename: String.t(), token: nil | String.t()}
 
   def server_name(base_name), do: :"#{base_name}.TokenStore"
 
@@ -16,6 +18,13 @@ defmodule FedecksClient.TokenStore do
     GenServer.start_link(__MODULE__, {directory, name}, name: name)
   end
 
+  @spec init(
+          {binary
+           | maybe_improper_list(
+               binary | maybe_improper_list(any, binary | []) | char,
+               binary | []
+             ), any}
+        ) :: {:ok, FedecksClient.TokenStore.t()}
   def init({directory, name}) do
     file = Path.join(directory, to_string(name))
 
@@ -25,7 +34,7 @@ defmodule FedecksClient.TokenStore do
         _ -> nil
       end
 
-    {:ok, %__MODULE__{filename: file, token: token}}
+    {:ok, %__MODULE__{directory: directory, filename: file, token: token}}
   end
 
   def set_token(server, token) do
@@ -36,7 +45,8 @@ defmodule FedecksClient.TokenStore do
     GenServer.call(server, :get_token)
   end
 
-  def handle_cast({:set_token, token}, %{filename: filename} = state) do
+  def handle_cast({:set_token, token}, %{filename: filename, directory: directory} = state) do
+    File.mkdir_p!(directory)
     File.write!(filename, :erlang.term_to_binary(token))
     {:noreply, %{state | token: token}}
   end

@@ -1,5 +1,5 @@
 defmodule FedecksClient.Websockets.WebsocketUrlTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias FedecksClient.Websockets.WebsocketUrl
 
   test "valid ws urls" do

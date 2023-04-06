@@ -5,9 +5,11 @@ defmodule FedecksClient.FedecksSupervisor do
   use Supervisor
   alias FedecksClient.TokenStore
 
+  def supervisor_name(base_name), do: :"#{base_name}.Supervisor"
+
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)
-    Supervisor.start_link(__MODULE__, {name, opts}, name: :"#{name}.Supervisor")
+    Supervisor.start_link(__MODULE__, {name, opts}, name: supervisor_name(name))
   end
 
   def init({name, args}) do

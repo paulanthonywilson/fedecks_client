@@ -1,5 +1,5 @@
 defmodule FedecksClient.TokenStoreTest do
-  use FedecksCase
+  use FedecksCase, async: true
   alias FedecksClient.TokenStore
 
   test "saving and retreiving", %{token_store: token_store} do
@@ -9,10 +9,11 @@ defmodule FedecksClient.TokenStoreTest do
   end
 
   test "persistence", %{token_store: token_store, name: name} do
+    %{directory: directory} = :sys.get_state(token_store)
     :ok = TokenStore.set_token(token_store, "my saved token")
     assert "my saved token" == TokenStore.token(token_store)
     ensure_killed(token_store)
-    {:ok, _pid} = TokenStore.start_link(directory: System.tmp_dir(), name: name)
+    {:ok, _pid} = TokenStore.start_link(directory: directory, name: name)
     assert "my saved token" == TokenStore.token(token_store)
   end
 

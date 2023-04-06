@@ -14,11 +14,12 @@ defmodule FedecksCase do
 
   setup do
     name = FedecksHelpers.generate_unique_name()
-    {:ok, pid} = TokenStore.start_link(directory: System.tmp_dir!(), name: name)
-    %{filename: file} = :sys.get_state(pid)
+    directory = "#{System.tmp_dir()}/#{name}"
+
+    {:ok, _pid} = TokenStore.start_link(directory: directory, name: name)
 
     on_exit(fn ->
-      if file, do: File.rm(file)
+      File.rm_rf(directory)
     end)
 
     {:ok, name: name, token_store: TokenStore.server_name(name)}

@@ -1,3 +1,79 @@
 defmodule FedecksClientTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
+
+  alias FedecksClient.{Connector, FedecksSupervisor, TokenStore}
+
+  defmodule FullyCustomised do
+    use FedecksClient
+    @alt_token_dir "#{System.tmp_dir!()}/#{__MODULE__}"
+
+    def token_dir, do: @alt_token_dir
+    def connection_url, do: "wss://example.com/somewhere/websocket"
+    def device_id, do: "some-device"
+    def connect_delay, do: 123_456
+    def ping_frequency, do: 12_000
+  end
+
+  defmodule MinimumConfig do
+    use FedecksClient
+
+    def connection_url, do: "wss://example.com/somewhere/websocket"
+    def device_id, do: "some-device"
+  end
+
+  setup do
+    on_exit(fn -> File.rm_rf!(FullyCustomised.token_dir()) end)
+    :ok
+  end
+
+  test "full configuration" do
+    assert {:ok, pid} = FullyCustomised.start_link([])
+    assert pid == FullyCustomised |> FedecksSupervisor.supervisor_name() |> Process.whereis()
+
+    assert connector_pid = FullyCustomised |> Connector.server_name() |> Process.whereis()
+
+    token_store = TokenStore.server_name(FullyCustomised)
+
+    assert %{
+             broadcast_topic: FullyCustomised,
+             connect_delay: 123_456,
+             token_store: ^token_store,
+             ping_frequency: 12_000
+           } = :sys.get_state(connector_pid)
+
+    assert Process.whereis(token_store)
+
+    assert %{directory: token_dir} = :sys.get_state(token_store)
+    assert token_dir == FullyCustomised.token_dir()
+  end
+
+  test "mimimum configuration" do
+    assert {:ok, pid} = MinimumConfig.start_link([])
+    assert pid == MinimumConfig |> FedecksSupervisor.supervisor_name() |> Process.whereis()
+
+    assert connector_pid = MinimumConfig |> Connector.server_name() |> Process.whereis()
+
+    token_store = TokenStore.server_name(MinimumConfig)
+
+    assert %{
+             broadcast_topic: MinimumConfig,
+             connect_delay: 10_000,
+             token_store: ^token_store,
+             ping_frequency: 19_000
+           } = :sys.get_state(connector_pid)
+
+    assert Process.whereis(token_store)
+
+    assert %{directory: token_dir} = :sys.get_state(token_store)
+    assert token_dir == FedecksClient.default_token_dir()
+  end
+
+  test "default token dir" do
+    assert FedecksClient.default_token_dir(:test, :host) =~ System.tmp_dir()
+    assert FedecksClient.default_token_dir(:test, nil) =~ System.tmp_dir()
+    assert FedecksClient.default_token_dir(:dev, :host) =~ System.tmp_dir()
+    assert FedecksClient.default_token_dir(:prod, :host) =~ System.tmp_dir()
+    assert FedecksClient.default_token_dir(:prod, :rpi0) =~ "/root/fedecks"
+    assert FedecksClient.default_token_dir(:dev, :rpi0) =~ "/root/fedecks"
+  end
 end

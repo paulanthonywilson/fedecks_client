@@ -1,5 +1,5 @@
 defmodule FedecksClient.Websockets.MintWsTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias FedecksClient.Websockets.{MintWs, WebsocketUrl}
 
   test "with valid url" do

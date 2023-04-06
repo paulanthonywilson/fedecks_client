@@ -14,7 +14,7 @@ defmodule FedecksClient.Connector do
   keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store, :ping_frequency]
   @enforce_keys keys
 
-  defstruct [:connection_status | keys]
+  defstruct [:connection_status, :connection_schedule_ref | keys]
 
   @type t :: %__MODULE__{
           connection_status: connection_status(),
@@ -22,7 +22,8 @@ defmodule FedecksClient.Connector do
           mint_ws: FedecksClient.Websockets.MintWs.t(),
           connect_delay: pos_integer(),
           token_store: atom(),
-          ping_frequency: pos_integer()
+          ping_frequency: pos_integer(),
+          connection_schedule_ref: reference()
         }
 
   def server_name(base_name), do: :"#{base_name}.Connector"
@@ -55,6 +56,14 @@ defmodule FedecksClient.Connector do
   @spec send_raw_message(GenServer.server(), binary()) :: :ok
   def send_raw_message(server, message) do
     GenServer.cast(server, {:send_raw_message, message})
+  end
+
+  @doc """
+  Attempt to login with the credentials
+  """
+  @spec login(GenServer.server(), credentials :: term()) :: :ok
+  def login(server, credentials) do
+    GenServer.cast(server, {:login, credentials})
   end
 
   @impl GenServer
@@ -98,11 +107,26 @@ defmodule FedecksClient.Connector do
     |> handle_message_send_result(state)
   end
 
-  @impl GenServer
   def handle_cast({:send_raw_message, message}, %{mint_ws: mint_ws} = state) do
     mint_ws
     |> MintWsConnection.send_raw(message)
     |> handle_message_send_result(state)
+  end
+
+  def handle_cast(
+        {:login, credentials},
+        %{token_store: token_store, connection_schedule_ref: connection_schedule_ref} = state
+      ) do
+    if connection_schedule_ref, do: Process.cancel_timer(connection_schedule_ref)
+    TokenStore.set_token(token_store, nil)
+
+    case attempt_connection(credentials, state) do
+      {:ok, state} ->
+        {:noreply, state}
+
+      {:error, state} ->
+        {:noreply, new_connection_status(state, :unregistered)}
+    end
   end
 
   defp handle_message_send_result({:ok, mint_ws}, state) do
@@ -122,20 +146,14 @@ defmodule FedecksClient.Connector do
 
   # Handling scheduling messages
   @impl GenServer
-  def handle_info({:attempt_connection, credentials}, %{mint_ws: mint_ws} = state) do
-    state = new_connection_status(state, :connecting)
+  def handle_info({:attempt_connection, credentials}, state) do
+    case attempt_connection(credentials, state) do
+      {:ok, state} ->
+        {:noreply, state}
 
-    state =
-      case MintWsConnection.connect(mint_ws, credentials) do
-        {:ok, mintws} ->
-          update_mint_ws(state, mintws)
-
-        {:error, reason} ->
-          broadcast(state, {:connection_failed, reason})
-          schedule_connection(state, credentials)
-      end
-
-    {:noreply, state}
+      {:error, state} ->
+        {:noreply, schedule_connection(state, credentials)}
+    end
   end
 
   def handle_info(:request_a_new_token, %{mint_ws: mint_ws} = state) do
@@ -172,11 +190,11 @@ defmodule FedecksClient.Connector do
           |> update_mint_ws(mint_ws)
 
         {err, reason} when err in [:error, :upgrade_error] ->
-          {:ok, _mint_ws} = MintWsConnection.close(mint_ws)
           broadcast(state, {:upgrade_failed, reason})
+          {:ok, mint_ws} = MintWsConnection.close(mint_ws)
 
           state
-          |> update_mint_ws(nil)
+          |> update_mint_ws(mint_ws)
           |> new_connection_status(:unregistered)
       end
 
@@ -188,6 +206,20 @@ defmodule FedecksClient.Connector do
     # Socket's closed so let's just "let it die" and let the supervisor deal with
     # reconnection logic.
     {:stop, :normal, state}
+  end
+
+  defp attempt_connection(credentials, %{mint_ws: mint_ws} = state) do
+    state = new_connection_status(state, :connecting)
+
+    case MintWsConnection.connect(mint_ws, credentials) do
+      {:ok, mintws} ->
+        state = update_mint_ws(state, mintws)
+        {:ok, state}
+
+      {:error, reason} ->
+        broadcast(state, {:connection_failed, reason})
+        {:error, state}
+    end
   end
 
   defp handle_messages(state, messages) do
@@ -209,8 +241,8 @@ defmodule FedecksClient.Connector do
   end
 
   defp schedule_connection(%{connect_delay: connect_delay} = state, credentials) do
-    Process.send_after(self(), {:attempt_connection, credentials}, connect_delay)
-    new_connection_status(state, :connection_scheduled)
+    ref = Process.send_after(self(), {:attempt_connection, credentials}, connect_delay)
+    new_connection_status(%{state | connection_schedule_ref: ref}, :connection_scheduled)
   end
 
   defp broadcast(%{broadcast_topic: topic}, message) do

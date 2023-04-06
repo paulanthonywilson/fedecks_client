@@ -1,5 +1,5 @@
 defmodule FedecksClient.CompileEnvTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias FedecksClient.CompileEnv
 
   test "Not test?() in dev or prod Mix.env()" do

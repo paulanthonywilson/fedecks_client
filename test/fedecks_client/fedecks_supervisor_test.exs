@@ -1,5 +1,5 @@
 defmodule FedecksClient.FedecksSupervisorTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias FedecksClient.{FedecksSupervisor, TokenStore}
 
   import FedecksHelpers

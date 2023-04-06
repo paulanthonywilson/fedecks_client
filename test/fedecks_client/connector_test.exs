@@ -56,7 +56,7 @@ defmodule FedecksClient.ConnectorTest do
                ctx |> Map.to_list() |> Connector.init()
 
       assert_receive {^name, :unregistered}
-      refute_receive :attempt_connection
+      refute_receive {:attempt_connection, _}
     end
 
     test "schedules an attempt at connection if there is a token configured",
@@ -100,7 +100,7 @@ defmodule FedecksClient.ConnectorTest do
       assert :connecting = Connector.connection_status(pid)
     end
 
-    test "when connection fails, notifies listeners of failure and ", %{name: name} = ctx do
+    test "when connection fails, notifies listeners of failure", %{name: name} = ctx do
       {:ok, pid} = start(ctx)
 
       expect(MockMintWsConnection, :connect, fn _mintws, _credentials ->
@@ -115,7 +115,7 @@ defmodule FedecksClient.ConnectorTest do
     end
 
     test "reschedules a new connection attempt on failure" do
-      credentials = %{"username" => "bob", "password" => "sue"}
+      credentials = %{"fedecks-token" => "a token"}
 
       stub(MockMintWsConnection, :connect, fn _, _ ->
         {:error, "failure"}
@@ -140,6 +140,61 @@ defmodule FedecksClient.ConnectorTest do
       )
 
       refute_receive {:attempt_connection, _}
+    end
+  end
+
+  describe "explicit login" do
+    test "cancels any scheduled connection attempts", %{token_store: token_store} = ctx do
+      TokenStore.set_token(token_store, "hello")
+      {:ok, state} = %{ctx | connect_delay: 50} |> Map.to_list() |> Connector.init()
+
+      stub(MockMintWsConnection, :connect, fn mintws, _credentials ->
+        {:ok, mintws}
+      end)
+
+      {:noreply, _} = Connector.handle_cast({:login, %{}}, state)
+      refute_receive {:attempt_connection, _}
+    end
+
+    test "attempts to connect  and upgrade", %{name: name} = ctx do
+      {:ok, pid} = start(ctx)
+
+      ref = :erlang.list_to_ref('#Ref<0.1.2.3>')
+
+      expect(MockMintWsConnection, :connect, fn mintws, credentials ->
+        assert %MintWs{device_id: @device_id} = mintws
+        assert %{"username" => "bob", "password" => "marvelous"} = credentials
+        {:ok, %{mintws | ref: ref}}
+      end)
+
+      Connector.login(pid, %{"username" => "bob", "password" => "marvelous"})
+      assert %{mint_ws: %{ref: ^ref}} = :sys.get_state(pid)
+
+      assert_receive {^name, :connecting}
+      assert :connecting = Connector.connection_status(pid)
+    end
+
+    test "blanks the token", %{token_store: token_store} = ctx do
+      {:ok, pid} = start(ctx)
+      stub(MockMintWsConnection, :connect, fn mintws, _ -> {:ok, mintws} end)
+      TokenStore.set_token(token_store, "wibble")
+      Connector.login(pid, %{"username" => "bob", "password" => "marvelous"})
+      process_all_gen_server_messages(pid)
+      assert nil == TokenStore.token(token_store)
+    end
+
+    test "on error, broadcats connection failed but does not attempt reconnection",
+         %{name: name} = ctx do
+      {:ok, pid} = start(ctx)
+
+      expect(MockMintWsConnection, :connect, fn _mintws, _credentials ->
+        {:error, :failure}
+      end)
+
+      Connector.login(pid, %{"username" => "bob", "password" => "marvelous"})
+      assert_receive {^name, {:connection_failed, :failure}}
+      refute_receive {^name, :connection_scheduled}
+      assert :unregistered = Connector.connection_status(pid)
     end
   end
 
@@ -187,7 +242,7 @@ defmodule FedecksClient.ConnectorTest do
       assert_receive {^name, :unregistered}
       assert :unregistered = Connector.connection_status(pid)
 
-      assert %{mint_ws: nil} = :sys.get_state(pid)
+      assert %{mint_ws: %MintWs{}} = :sys.get_state(pid)
     end
 
     test "if upgrade errors, notifies, blanks token, and marks as unregistered", %{
@@ -205,7 +260,7 @@ defmodule FedecksClient.ConnectorTest do
       assert_receive {^name, :unregistered}
       assert :unregistered = Connector.connection_status(pid)
 
-      assert %{mint_ws: nil} = :sys.get_state(pid)
+      assert %{mint_ws: %MintWs{}} = :sys.get_state(pid)
     end
   end
 
@@ -410,12 +465,14 @@ defmodule FedecksClient.ConnectorTest do
     broadcast_topic = Map.get(args, :name, :some_topic)
     {:ok, mint_ws} = MintWs.new(@connection_url, @device_id)
 
-    %{
+    args
+    |> Enum.into(%{
       connection_status: :connecting,
       broadcast_topic: broadcast_topic,
-      mint_ws: mint_ws
-    }
-    |> Enum.into(args)
+      mint_ws: mint_ws,
+      connect_delay: 60_000,
+      connection_schedule_ref: nil
+    })
     |> Map.put(:__struct__, Connector)
   end
 end
