@@ -51,6 +51,7 @@ defmodule FedecksClient.MixProject do
     [main: "readme", extras: ["README.md", "CHANGELOG.md"]]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "example", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "example"]
   defp elixirc_paths(_), do: ["lib"]
 end
