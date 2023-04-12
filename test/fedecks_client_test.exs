@@ -1,6 +1,11 @@
 defmodule FedecksClientTest do
   use ExUnit.Case, async: true
 
+  import FedecksHelpers
+  import Mox
+
+  setup :verify_on_exit!
+
   alias FedecksClient.{Connector, FedecksSupervisor, TokenStore}
 
   defmodule FullyCustomised do
@@ -45,6 +50,39 @@ defmodule FedecksClientTest do
 
     assert %{directory: token_dir} = :sys.get_state(token_store)
     assert token_dir == FullyCustomised.token_dir()
+  end
+
+  describe "connection functions" do
+    setup do
+      {:ok, _pid} = MinimumConfig.start_link([])
+      allow(MockMintWsConnection, self(), MinimumConfig.Connector)
+      :ok
+    end
+
+    test "login" do
+      creds = %{"username" => "bob", "password" => "mavis"}
+      expect(MockMintWsConnection, :connect, fn mintws, ^creds -> {:ok, mintws} end)
+      assert :ok = MinimumConfig.login(creds)
+      process_all_gen_server_messages(MinimumConfig.Connector)
+    end
+
+    test "subscribe" do
+      assert :ok = MinimumConfig.subscribe()
+      SimplestPubSub.publish(MinimumConfig, "yep")
+      assert_receive "yep"
+    end
+
+    test "send message" do
+      expect(MockMintWsConnection, :send, fn mintws, {"hello", "matey"} -> {:ok, mintws} end)
+      assert :ok = MinimumConfig.send({"hello", "matey"})
+      process_all_gen_server_messages(MinimumConfig.Connector)
+    end
+
+    test "send raw message" do
+      expect(MockMintWsConnection, :send_raw, fn mintws, "hello" -> {:ok, mintws} end)
+      assert :ok = MinimumConfig.send_raw("hello")
+      process_all_gen_server_messages(MinimumConfig.Connector)
+    end
   end
 
   test "mimimum configuration" do

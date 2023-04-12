@@ -5,6 +5,9 @@ defmodule FedecksClient do
 
   defmacro __using__(_) do
     quote do
+      @behaviour unquote(__MODULE__)
+
+      @connector FedecksClient.Connector.server_name(__MODULE__)
       def start_link(_) do
         maybe_val = fn fun, default ->
           if function_exported?(__MODULE__, fun, 0) do
@@ -24,16 +27,109 @@ defmodule FedecksClient do
             maybe_val.(:ping_frequency, unquote(__MODULE__).default_ping_frequency())
         )
       end
+
+      @impl unquote(__MODULE__)
+      def login(credentials) do
+        FedecksClient.Connector.login(@connector, credentials)
+      end
+
+      @impl unquote(__MODULE__)
+      def subscribe do
+        SimplestPubSub.subscribe(__MODULE__)
+      end
+
+      @impl unquote(__MODULE__)
+      def send(message) do
+        FedecksClient.Connector.send_message(@connector, message)
+      end
+
+      @impl unquote(__MODULE__)
+      def send_raw(message) do
+        FedecksClient.Connector.send_raw_message(@connector, message)
+      end
     end
   end
 
-  @default_connect_delay 10_000
-  @default_ping_frequency 19_000
+  @doc """
+  Server websocket URL. Must start with "ws://" or "wss://"
+  """
+  @callback connection_url :: String.t()
+
+  @doc """
+  Device id to identify this device when communicating with the server
+  """
+  @callback device_id :: String.t()
+
+  @doc """
+  Initiate a login to the server.
+
+  Implementation provided by the `__using__` macro
+  """
+  @callback login(credentials :: term()) :: :ok
+
+  @doc """
+  Subscribe to Fedecks events. Messages are sent in the form `{ModuleName, message}`.
+  See module doc for messages
+
+
+  Implementation provided by the `__using__` macro
+  """
+  @callback subscribe :: :ok
+
+  @doc """
+  Send an encoded message to the server. Note that the server will use safe decoding so it is best to avoid
+  atoms.
+
+
+  Implementation provided by the `__using__` macro
+  """
+  @callback send(message :: term()) :: :ok
+  @doc """
+  Send an raw binary message to the server.
+
+
+  Implementation provided by the `__using__` macro
+  """
+  @callback send_raw(message :: term()) :: :ok
+
+  @doc """
+  Directory to store the Fedecks Token. Optional and defaults to `FedecksClient.default_token_dir/0`
+  """
+  @callback token_dir :: String.t()
+
+  @doc """
+  How long to wait before and between connection attempts. Bear in mind that it my take some time
+  for a network connection to be established if using Nerves Networking and WiFi
+
+  Optional and defaults to 10 seconds
+  """
+  @callback connect_delay :: pos_integer()
+
+  @doc """
+  How often to ping the server to maintain the connection. Bear in mind that the server will drop the connection
+  after 1 minute of inactivity.
+
+  Optional and defaults to 19 seconds
+  """
+  @callback ping_frequency :: pos_integer()
+
+  @optional_callbacks [token_dir: 0, connect_delay: 0, ping_frequency: 0]
+
+  @default_connect_delay :timer.seconds(10)
+  @default_ping_frequency :timer.seconds(19)
 
   @mix_env Mix.env()
   @mix_target Mix.target()
 
   @dev_token_dir "#{System.tmp_dir!()}/#{__MODULE__}"
+
+  @doc """
+  The default directory for Fedecks tokens. Value is depenendend on the mix environment and target and
+  assumes you are using this for Nerves.
+  * If the env is `:test` or target is `:host` then it is the module name under the system temp directory.
+  * Otherwise "/root/fedecks"
+  """
+  @spec default_token_dir() :: String.t()
   def default_token_dir(mix_env \\ @mix_env, mix_target \\ @mix_target)
   def default_token_dir(:test, _), do: @dev_token_dir
   def default_token_dir(_, :host), do: @dev_token_dir
