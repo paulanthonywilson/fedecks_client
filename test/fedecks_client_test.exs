@@ -52,6 +52,10 @@ defmodule FedecksClientTest do
     assert token_dir == FullyCustomised.token_dir()
   end
 
+  test "child spec" do
+    assert %{start: {MinimumConfig, :start_link, [:opts]}} = MinimumConfig.child_spec(:opts)
+  end
+
   describe "connection functions" do
     setup do
       {:ok, _pid} = MinimumConfig.start_link([])
@@ -82,6 +86,10 @@ defmodule FedecksClientTest do
       expect(MockMintWsConnection, :send_raw, fn mintws, "hello" -> {:ok, mintws} end)
       assert :ok = MinimumConfig.send_raw("hello")
       process_all_gen_server_messages(MinimumConfig.Connector)
+    end
+
+    test "connection_status" do
+      assert :unregistered == MinimumConfig.connection_status()
     end
   end
 

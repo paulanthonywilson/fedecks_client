@@ -81,6 +81,21 @@ defmodule FedecksClient do
       def send_raw(message) do
         FedecksClient.Connector.send_raw_message(@connector, message)
       end
+
+      @impl unquote(__MODULE__)
+      def connection_status do
+        FedecksClient.Connector.connection_status(@connector)
+      end
+
+      def child_spec(opts) do
+        %{
+          id: __MODULE__,
+          start: {__MODULE__, :start_link, [opts]},
+          type: :worker,
+          restart: :permanent,
+          shutdown: 500
+        }
+      end
     end
   end
 
@@ -120,6 +135,7 @@ defmodule FedecksClient do
   Implementation provided by the `__using__` macro
   """
   @callback send(message :: term()) :: :ok
+
   @doc """
   Send an raw binary message to the server.
 
@@ -127,6 +143,14 @@ defmodule FedecksClient do
   Implementation provided by the `__using__` macro
   """
   @callback send_raw(message :: term()) :: :ok
+
+  @doc """
+  Send an raw binary message to the server.
+
+
+  Implementation provided by the `__using__` macro
+  """
+  @callback connection_status :: FedecksClient.Connector.connection_status()
 
   @doc """
   Directory to store the Fedecks Token. Optional and defaults to `FedecksClient.default_token_dir/0`
