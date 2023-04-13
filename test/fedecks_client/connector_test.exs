@@ -322,7 +322,11 @@ defmodule FedecksClient.ConnectorTest do
 
   describe "sending" do
     setup ctx do
-      {:ok, connector: start_upgraded_connection(ctx)}
+      if ctx[:skip_start] do
+        :ok
+      else
+        {:ok, connector: start_upgraded_connection(ctx)}
+      end
     end
 
     test "a normal message, sends a normal message", %{connector: pid} do
@@ -367,6 +371,17 @@ defmodule FedecksClient.ConnectorTest do
       process_all_gen_server_messages(pid)
 
       assert_receive {^name, {:connection_error, "another error"}}
+    end
+
+    @tag :skip_start
+    test "will not send or raw send if not connected", ctx do
+      expect(MockMintWsConnection, :send, 0, fn mintws, _ -> {:ok, mintws} end)
+      expect(MockMintWsConnection, :send_raw, 0, fn mintws, _ -> {:ok, mintws} end)
+      {:ok, pid} = start(ctx)
+
+      assert :ok = Connector.send_message(pid, "hello")
+      assert :ok = Connector.send_raw_message(pid, "hello")
+      process_all_gen_server_messages(pid)
     end
   end
 

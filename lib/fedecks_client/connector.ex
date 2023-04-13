@@ -101,16 +101,26 @@ defmodule FedecksClient.Connector do
   end
 
   @impl GenServer
-  def handle_cast({:send_message, message}, %{mint_ws: mint_ws} = state) do
+  def handle_cast(
+        {:send_message, message},
+        %{mint_ws: mint_ws, connection_status: :connected} = state
+      ) do
     mint_ws
     |> MintWsConnection.send(message)
     |> handle_message_send_result(state)
   end
 
-  def handle_cast({:send_raw_message, message}, %{mint_ws: mint_ws} = state) do
+  def handle_cast(
+        {:send_raw_message, message},
+        %{mint_ws: mint_ws, connection_status: :connected} = state
+      ) do
     mint_ws
     |> MintWsConnection.send_raw(message)
     |> handle_message_send_result(state)
+  end
+
+  def handle_cast({message_id, _}, state) when message_id in [:send_message, :send_raw_message] do
+    {:noreply, state}
   end
 
   def handle_cast(

@@ -77,12 +77,20 @@ defmodule FedecksClientTest do
     end
 
     test "send message" do
+      :sys.replace_state(MinimumConfig.Connector, fn state ->
+        %{state | connection_status: :connected}
+      end)
+
       expect(MockMintWsConnection, :send, fn mintws, {"hello", "matey"} -> {:ok, mintws} end)
       assert :ok = MinimumConfig.send({"hello", "matey"})
       process_all_gen_server_messages(MinimumConfig.Connector)
     end
 
     test "send raw message" do
+      :sys.replace_state(MinimumConfig.Connector, fn state ->
+        %{state | connection_status: :connected}
+      end)
+
       expect(MockMintWsConnection, :send_raw, fn mintws, "hello" -> {:ok, mintws} end)
       assert :ok = MinimumConfig.send_raw("hello")
       process_all_gen_server_messages(MinimumConfig.Connector)
