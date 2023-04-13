@@ -173,7 +173,8 @@ defmodule FedecksClient.Connector do
   end
 
   # Handling connection messages
-  def handle_info({:tcp, _socket, _data} = incoming, %{mint_ws: mint_ws} = state) do
+  def handle_info({protocol, _socket, _data} = incoming, %{mint_ws: mint_ws} = state)
+      when protocol in [:tcp, :ssl] do
     state =
       case MintWsConnection.handle_in(mint_ws, incoming) do
         {:upgraded, mint_ws} ->
@@ -201,7 +202,7 @@ defmodule FedecksClient.Connector do
     {:noreply, state}
   end
 
-  def handle_info({:tcp_closed, _socket}, state) do
+  def handle_info({closed, _socket}, state) when closed in [:tcp_closed, :ssl_closed] do
     broadcast(state, :connection_lost)
     # Socket's closed so let's just "let it die" and let the supervisor deal with
     # reconnection logic.

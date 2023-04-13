@@ -1,5 +1,39 @@
 defmodule FedecksClient do
   @moduledoc """
+  Establishes a websocket connection to the server.
+
+  Eg :
+
+  ```
+  defmodule MyApp.MyClient do
+    use FedecksClient
+      def device_id do
+        {:ok, name} = :inet.hostname()
+        to_string(name)
+      end
+
+      def connection_url do
+        Application.fetch_env!(:my_app, :fedecks_server_path)
+      end
+  end
+  ```
+
+  Include in your supervision tree.
+
+  eg
+  ```
+  defmodule MyApp.Application do
+    children = [
+      MyApp.MyClient
+    ]
+    opts = [strategy: :one_for_one, name: MyApp.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+  ```
+
+  Initial authentication to the server with `c:FedecksClient.login/1`. Subsequent
+  connections will authenticate with a token provided by the server, persisting between reboots,
+  until the token expires or otherwise becomes invalid.
 
   """
 
@@ -51,7 +85,9 @@ defmodule FedecksClient do
   end
 
   @doc """
-  Server websocket URL. Must start with "ws://" or "wss://"
+  Server websocket URL. Must start with "ws://" or "wss://".
+
+  Remeber to append "/websocket" if using a Phoenix (ie Fedecks) websocket.
   """
   @callback connection_url :: String.t()
 

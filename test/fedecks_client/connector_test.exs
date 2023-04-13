@@ -309,6 +309,15 @@ defmodule FedecksClient.ConnectorTest do
 
       assert "some token or other" == TokenStore.token(token_store)
     end
+
+    test "handles ssl messages", %{connector: pid, name: name} do
+      expect(MockMintWsConnection, :handle_in, fn %MintWs{} = mint_ws, {_, _, "yyy"} ->
+        {:messages, mint_ws, ["hello matey"]}
+      end)
+
+      send(pid, {:ssl, fake_socket(), "yyy"})
+      assert_receive {^name, {:message, "hello matey"}}
+    end
   end
 
   describe "sending" do
@@ -407,6 +416,11 @@ defmodule FedecksClient.ConnectorTest do
 
     test "notifies listeners", %{name: name, connector: pid} do
       send(pid, {:tcp_closed, fake_socket()})
+      assert_receive {^name, :connection_lost}
+    end
+
+    test "supports ssl", %{name: name, connector: pid} do
+      send(pid, {:ssl_closed, fake_socket()})
       assert_receive {^name, :connection_lost}
     end
 

@@ -15,7 +15,7 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
       ) do
     auth = auth(mint_ws, credentials)
 
-    with {:ok, conn} <- Mint.HTTP.connect(http_scheme, host, port),
+    with {:ok, conn} <- Mint.HTTP.connect(http_scheme, host, port, protocols: [:http1]),
          {:ok, conn, ref} <-
            Mint.WebSocket.upgrade(scheme, conn, path, [{"x-fedecks-auth", auth}]) do
       {:ok, %{mint_ws | conn: conn, ref: ref}}

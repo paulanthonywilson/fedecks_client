@@ -3,6 +3,7 @@ defmodule AClient do
 
   def device_id, do: "device-123"
 
-  def connection_url, do: "ws://localhost:4000/fedecks/websocket"
-
+  def connection_url do
+    System.get_env("FEDECKS_SERVER", "ws://localhost:4000/fedecks/websocket")
+  end
 end
