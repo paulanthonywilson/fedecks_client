@@ -1,6 +1,6 @@
 defmodule FedecksClient.Websockets.MintWsConnection do
   @moduledoc """
-  Testing seam for interactions with `Mint`/``MintWebsocket`.
+  Testing seam for interactions with `Mint` and `MintWebsocket`.
 
   Note the functional approach taken by `Mint` - each operation returns a copy of this struct,
   updated (probably) by the operation.

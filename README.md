@@ -2,10 +2,7 @@
 
 Client side of Fedecks for device to Phoenix communication over binary websockets.
 
-
-
-## Installation
-
+I promise more documentation soon. See `FedecksClient` for now.
 
 
 ```elixir
@@ -15,5 +12,3 @@ def deps do
   ]
 end
 ```
-
-(except not yet)
