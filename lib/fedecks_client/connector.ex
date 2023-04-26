@@ -1,15 +1,16 @@
 defmodule FedecksClient.Connector do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Manages connecting, and reconnecting, to a server over websockets
   """
+
   use FedecksClient.Websockets.MintWsConnection
 
   alias FedecksClient.{TokenStore, Websockets.MintWs}
 
   use GenServer
 
-  @type connection_status ::
-          :unregistered | :connecting | :connection_scheduled | :failed_registration | :connected
+  @type connection_status :: FedecksClient.connection_status()
 
   keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store, :ping_frequency]
   @enforce_keys keys

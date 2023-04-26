@@ -1,5 +1,6 @@
 defmodule FedecksClient.Websockets.MintWsConnection do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Testing seam for interactions with `Mint` and `MintWebsocket`.
 
   Note the functional approach taken by `Mint` - each operation returns a copy of this struct,

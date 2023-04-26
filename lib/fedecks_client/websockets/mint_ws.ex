@@ -1,5 +1,6 @@
 defmodule FedecksClient.Websockets.MintWs do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Holds a MintWs connection and associated  websocket and Fedecks inforrmation.
 
   Note the functional approach taken by `Mint` - each operation returns a copy of this struct,

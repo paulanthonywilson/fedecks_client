@@ -1,7 +1,9 @@
 defmodule FedecksClient.TokenStore do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Persistant store for the connection token. Implemented as a simple GenServer
   """
+
   use GenServer
 
   keys = [:directory, :filename, :token]

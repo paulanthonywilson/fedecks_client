@@ -1,5 +1,6 @@
 defmodule FedecksClient.Websockets.WebsocketUrl do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Holds and validates  websocket url in a way that is useful for using with Mint Websockets.
 
   Struct values:

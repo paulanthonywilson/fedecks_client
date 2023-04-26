@@ -1,7 +1,9 @@
 defmodule FedecksClient.Websockets.RealMintWsConnection do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Handles Fedecks websockets via `Mint` and `Mint.WebSocket`
   """
+
   alias FedecksClient.Websockets.{MintWs, MintWsConnection}
 
   @behaviour MintWsConnection
@@ -15,6 +17,8 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
       ) do
     auth = auth(mint_ws, credentials)
 
+    # If we don't specify `:http1` then `http2` gets used which works fine when connecting directly
+    # to Cowboy but not so much when proxied behind `nginx` which happens with a Fly.io CNAMEd custom domain.
     with {:ok, conn} <- Mint.HTTP.connect(http_scheme, host, port, protocols: [:http1]),
          {:ok, conn, ref} <-
            Mint.WebSocket.upgrade(scheme, conn, path, [{"x-fedecks-auth", auth}]) do

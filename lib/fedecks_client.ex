@@ -37,6 +37,9 @@ defmodule FedecksClient do
 
   """
 
+  @type connection_status ::
+          :unregistered | :connecting | :connection_scheduled | :failed_registration | :connected
+
   defmacro __using__(_) do
     quote do
       @behaviour unquote(__MODULE__)
@@ -150,16 +153,18 @@ defmodule FedecksClient do
 
   Implementation provided by the `__using__` macro
   """
-  @callback connection_status :: FedecksClient.Connector.connection_status()
+  @callback connection_status :: connection_status()
 
   @doc """
-  Directory to store the Fedecks Token. Optional and defaults to `FedecksClient.default_token_dir/0`
+  Filesystem directory to store the Fedecks Token. Optional and defaults to `FedecksClient.default_token_dir/0`
+  ("root/fedecks" on a Nerves installation)
   """
   @callback token_dir :: String.t()
 
   @doc """
   How long to wait before and between connection attempts. Bear in mind that it my take some time
-  for a network connection to be established if using Nerves Networking and WiFi
+  for a network connection to be established if using Nerves Networking and WiFi. Frequent restarts
+  could propagate and take down the application.
 
   Optional and defaults to 10 seconds
   """

@@ -1,7 +1,9 @@
 defmodule FedecksCase do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Sets up a name / topic and a token store.
   """
+
   use ExUnit.CaseTemplate
 
   alias FedecksClient.TokenStore

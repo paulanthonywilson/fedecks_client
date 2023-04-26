@@ -1,7 +1,9 @@
 defmodule FedecksClient.FedecksSupervisor do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Supervises a connector and a token store
   """
+
   use Supervisor
   alias FedecksClient.TokenStore
 

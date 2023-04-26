@@ -1,5 +1,6 @@
 defmodule NonFedecksSocket do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   For sending non-fedecks messages to be ignored
   """
 

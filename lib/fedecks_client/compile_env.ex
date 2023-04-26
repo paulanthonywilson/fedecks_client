@@ -1,5 +1,6 @@
 defmodule FedecksClient.CompileEnv do
-  @moduledoc """
+  @moduledoc false
+  _doc = """
   Convenience module for determining the compilation environment, specifically
   using the values of `Mix.env/0` and `Mix.target/0` to figure out if we are running tests
   so will want to substitute in some choice Mox "mocks" in appropriate places.
