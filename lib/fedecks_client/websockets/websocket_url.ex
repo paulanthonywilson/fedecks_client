@@ -9,7 +9,7 @@ defmodule FedecksClient.Websockets.WebsocketUrl do
   * `http_scheme`: if scheme is `:ws` then `http`, otherwise `https`. Used by establish the
     initial `Mint` connection before upgrade
   * `port`: the TCP port (obvs)
-  * `path`: Path part of theurl (obvs)
+  * `path`: Path part of the url (obvs)
   """
 
   required_keys = [:scheme, :http_scheme, :host, :port, :path]
