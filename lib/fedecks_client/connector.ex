@@ -186,31 +186,32 @@ defmodule FedecksClient.Connector do
   # Handling connection messages
   def handle_info({protocol, _socket, _data} = incoming, %{mint_ws: mint_ws} = state)
       when protocol in [:tcp, :ssl] do
-    state =
-      case MintWsConnection.handle_in(mint_ws, incoming) do
-        {:upgraded, mint_ws} ->
-          send(self(), :request_a_new_token)
+    case MintWsConnection.handle_in(mint_ws, incoming) do
+      {:upgraded, mint_ws} ->
+        send(self(), :request_a_new_token)
 
+        state
+        |> schedule_ping()
+        |> update_mint_ws(mint_ws)
+        |> new_connection_status(:connected)
+        |> no_reply()
+
+      {:messages, mint_ws, messages} ->
+        state
+        |> handle_messages(messages)
+        |> update_mint_ws(mint_ws)
+        |> no_reply()
+
+      {err, reason} when err in [:error, :upgrade_error] ->
+        broadcast(state, {:upgrade_failed, reason})
+        {:ok, mint_ws} = MintWsConnection.close(mint_ws)
+
+        state =
           state
-          |> schedule_ping()
-          |> update_mint_ws(mint_ws)
-          |> new_connection_status(:connected)
-
-        {:messages, mint_ws, messages} ->
-          state
-          |> handle_messages(messages)
           |> update_mint_ws(mint_ws)
 
-        {err, reason} when err in [:error, :upgrade_error] ->
-          broadcast(state, {:upgrade_failed, reason})
-          {:ok, mint_ws} = MintWsConnection.close(mint_ws)
-
-          state
-          |> update_mint_ws(mint_ws)
-          |> new_connection_status(:unregistered)
-      end
-
-    {:noreply, state}
+        {:stop, :normal, state}
+    end
   end
 
   def handle_info({closed, _socket}, state) when closed in [:tcp_closed, :ssl_closed] do
@@ -219,6 +220,8 @@ defmodule FedecksClient.Connector do
     # reconnection logic.
     {:stop, :normal, state}
   end
+
+  defp no_reply(state), do: {:noreply, state}
 
   defp attempt_connection(credentials, %{mint_ws: mint_ws} = state) do
     state = new_connection_status(state, :connecting)

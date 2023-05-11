@@ -7,3 +7,7 @@ Documentation light initial version, pushed up early for Elixir Conf EU Lightnin
 # v0.1.1
 
 More documentation 
+
+# v0.1.2
+
+Change of behaviour on receiving errors during connection upgrade. Previously Fedecks assumed an urecoverable fault; now the connector restarts and tries again. It could be a routing issue causing a 404 or a server side issue which could get resolved.

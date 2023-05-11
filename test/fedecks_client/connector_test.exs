@@ -227,40 +227,26 @@ defmodule FedecksClient.ConnectorTest do
       process_all_gen_server_messages(pid)
     end
 
-    test "if   errors, notifies, blanks token, and marks as unregistered", %{
-      name: name,
-      connector: pid
-    } do
-      stub(MockMintWsConnection, :handle_in, fn _, _ ->
-        {:error, :unknown}
-      end)
-
-      expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
-
-      send(pid, {:tcp, fake_socket(), "blah blah"})
-      assert_receive {^name, {:upgrade_failed, :unknown}}
-      assert_receive {^name, :unregistered}
-      assert :unregistered = Connector.connection_status(pid)
-
-      assert %{mint_ws: %MintWs{}} = :sys.get_state(pid)
+    test "if   errors, notifies, blanks token, and marks as unregistered", ctx do
+      check_exits_on_upgrade_failure(ctx, :error)
     end
 
-    test "if upgrade errors, notifies, blanks token, and marks as unregistered", %{
-      name: name,
-      connector: pid
-    } do
+    test "if upgrade errors, notifies, and exits", ctx do
+      check_exits_on_upgrade_failure(ctx, :upgrade_error)
+    end
+
+    defp check_exits_on_upgrade_failure(%{connector: pid, name: name}, error_type) do
       stub(MockMintWsConnection, :handle_in, fn _, _ ->
-        {:upgrade_error, :unknown}
+        {error_type, :unknown}
       end)
 
       expect(MockMintWsConnection, :close, fn %MintWs{} = mint_ws -> {:ok, mint_ws} end)
 
+      ref = Process.monitor(pid)
+
       send(pid, {:tcp, fake_socket(), "blah blah"})
       assert_receive {^name, {:upgrade_failed, :unknown}}
-      assert_receive {^name, :unregistered}
-      assert :unregistered = Connector.connection_status(pid)
-
-      assert %{mint_ws: %MintWs{}} = :sys.get_state(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
     end
   end
 
