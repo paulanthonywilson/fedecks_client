@@ -18,7 +18,7 @@ defmodule FedecksCase do
     name = FedecksHelpers.generate_unique_name()
     directory = "#{System.tmp_dir()}/#{name}"
 
-    {:ok, _pid} = TokenStore.start_link(directory: directory, name: name)
+    {:ok, _pid} = start_supervised({TokenStore, directory: directory, name: name})
 
     on_exit(fn ->
       File.rm_rf(directory)

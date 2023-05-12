@@ -1,6 +1,6 @@
 defmodule FedecksClient.FedecksSupervisorTest do
   use ExUnit.Case, async: true
-  alias FedecksClient.{FedecksSupervisor, TokenStore}
+  alias FedecksClient.{Connector, DeadMansHandle, FedecksSupervisor, TokenStore}
 
   import FedecksHelpers
 
@@ -9,13 +9,14 @@ defmodule FedecksClient.FedecksSupervisorTest do
     token_dir = "#{System.tmp_dir()}/#{name}"
 
     {:ok, _pid} =
-      FedecksSupervisor.start_link(
-        name: name,
-        token_dir: token_dir,
-        connection_url: "wss://example.com/fedecks/websocket",
-        device_id: "dev123",
-        connect_delay: 5_000,
-        ping_frequency: 30_000
+      start_supervised(
+        {FedecksSupervisor,
+         name: name,
+         token_dir: token_dir,
+         connection_url: "wss://example.com/fedecks/websocket",
+         device_id: "dev123",
+         connect_delay: 5_000,
+         ping_frequency: 30_000}
       )
 
     on_exit(fn -> File.rm_rf!(token_dir) end)
@@ -41,5 +42,21 @@ defmodule FedecksClient.FedecksSupervisorTest do
              token_store: ^token_store,
              ping_frequency: 30_000
            } = :sys.get_state(pid)
+  end
+
+  test "dead man's handle", %{name: name} do
+    assert pid = name |> DeadMansHandle.server_name() |> Process.whereis()
+    assert %{timeout: 30_000} = :sys.get_state(pid)
+  end
+
+  test "dead man's handle exit also takes out the connector", %{name: name} do
+    dead_man = name |> DeadMansHandle.server_name() |> Process.whereis()
+    connector = name |> Connector.server_name() |> Process.whereis()
+
+    ref = Process.monitor(connector)
+
+    Process.exit(dead_man, :kill)
+
+    assert_receive {:DOWN, ^ref, _, _, _}, 1_000
   end
 end

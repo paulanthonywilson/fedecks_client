@@ -1,6 +1,6 @@
 defmodule FedecksClient.ConnectorTest do
   use FedecksCase, async: true
-  alias FedecksClient.{Connector, TokenStore, Websockets.MintWs}
+  alias FedecksClient.{Connector, DeadMansHandle, TokenStore, Websockets.MintWs}
 
   import Mox
   setup :verify_on_exit!
@@ -396,7 +396,7 @@ defmodule FedecksClient.ConnectorTest do
       assert_receive :ping
     end
 
-    test "pinging on scheduled using the ping frequency " do
+    test "pinging on scheduled using the ping frequency" do
       Connector.handle_info(
         {:tcp, fake_socket(), "upgrade"},
         connector_state(%{ping_frequency: 5_000})
@@ -405,6 +405,44 @@ defmodule FedecksClient.ConnectorTest do
       refute_receive :ping
       Connector.handle_info(:ping, connector_state(%{ping_frequency: 5_000}))
       refute_receive :ping
+    end
+  end
+
+  describe "pongs" do
+    setup %{name: name} = ctx do
+      unless ctx[:skip_subscribe_to_pongs] do
+        name
+        |> DeadMansHandle.server_name()
+        |> SimplestPubSub.subscribe()
+      end
+
+      pid = start_upgraded_connection(ctx)
+      {:ok, pid: pid}
+    end
+
+    test "are sent to the pong topic", %{pid: pid} do
+      stub(MockMintWsConnection, :handle_in, fn mint_ws, {:tcp, _, :pretend_pong} ->
+        {:messages, mint_ws, [{:fedecks_server_pong, @device_id}]}
+      end)
+
+      send(pid, {:tcp, fake_socket(), :pretend_pong})
+      refute_receive {_, {:message, _}}
+      assert_receive :pong
+    end
+
+    @tag :skip_subscribe_to_pongs
+    test "are not sent to the general topic", %{pid: pid} do
+      stub(MockMintWsConnection, :handle_in, fn mint_ws, {:tcp, _, :pretend_pong} ->
+        {:messages, mint_ws, [{:fedecks_server_pong, @device_id}]}
+      end)
+
+      send(pid, {:tcp, fake_socket(), :pretend_pong})
+      refute_receive :pong
+    end
+
+    test "channel notified when there has been a ping", %{pid: pid} do
+      send(pid, :ping)
+      assert_receive :ping
     end
   end
 
@@ -486,7 +524,8 @@ defmodule FedecksClient.ConnectorTest do
       broadcast_topic: broadcast_topic,
       mint_ws: mint_ws,
       connect_delay: 60_000,
-      connection_schedule_ref: nil
+      connection_schedule_ref: nil,
+      pong_topic: :pong_topic
     })
     |> Map.put(:__struct__, Connector)
   end

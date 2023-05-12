@@ -6,13 +6,13 @@ defmodule FedecksClient.Connector do
 
   use FedecksClient.Websockets.MintWsConnection
 
-  alias FedecksClient.{TokenStore, Websockets.MintWs}
+  alias FedecksClient.{DeadMansHandle, TokenStore, Websockets.MintWs}
 
   use GenServer
 
   @type connection_status :: FedecksClient.connection_status()
 
-  keys = [:broadcast_topic, :mint_ws, :connect_delay, :token_store, :ping_frequency]
+  keys = [:broadcast_topic, :pong_topic, :mint_ws, :connect_delay, :token_store, :ping_frequency]
   @enforce_keys keys
 
   defstruct [:connection_status, :connection_schedule_ref | keys]
@@ -20,6 +20,7 @@ defmodule FedecksClient.Connector do
   @type t :: %__MODULE__{
           connection_status: connection_status(),
           broadcast_topic: atom(),
+          pong_topic: atom(),
           mint_ws: FedecksClient.Websockets.MintWs.t(),
           connect_delay: pos_integer(),
           token_store: atom(),
@@ -74,12 +75,14 @@ defmodule FedecksClient.Connector do
     token_store = Keyword.fetch!(args, :token_store)
     connect_delay = Keyword.fetch!(args, :connect_delay)
     ping_frequency = Keyword.fetch!(args, :ping_frequency)
+    name = Keyword.fetch!(args, :name)
 
     case MintWs.new(url, device_id) do
       {:ok, mint_ws} ->
         state = %__MODULE__{
           token_store: token_store,
-          broadcast_topic: Keyword.fetch!(args, :name),
+          broadcast_topic: name,
+          pong_topic: DeadMansHandle.server_name(name),
           mint_ws: mint_ws,
           connect_delay: connect_delay,
           ping_frequency: ping_frequency
@@ -172,7 +175,7 @@ defmodule FedecksClient.Connector do
     {:noreply, update_mint_ws(state, mint_ws)}
   end
 
-  def handle_info(:ping, %{mint_ws: mint_ws} = state) do
+  def handle_info(:ping, %{mint_ws: mint_ws, pong_topic: pong_topic} = state) do
     {:ok, mint_ws} = MintWsConnection.ping(mint_ws)
 
     state =
@@ -180,6 +183,7 @@ defmodule FedecksClient.Connector do
       |> update_mint_ws(mint_ws)
       |> schedule_ping()
 
+    SimplestPubSub.publish(pong_topic, :ping)
     {:noreply, state}
   end
 
@@ -244,6 +248,13 @@ defmodule FedecksClient.Connector do
 
   defp handle_one_message(%{token_store: token_store}, {:fedecks_token, token}) do
     TokenStore.set_token(token_store, token)
+  end
+
+  defp handle_one_message(
+         %{mint_ws: %{device_id: device_id}, pong_topic: pong_topic},
+         {:fedecks_server_pong, device_id}
+       ) do
+    SimplestPubSub.publish(pong_topic, :pong)
   end
 
   defp handle_one_message(state, message) do

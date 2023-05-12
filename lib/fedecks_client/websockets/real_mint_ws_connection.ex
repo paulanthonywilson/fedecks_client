@@ -113,6 +113,10 @@ defmodule FedecksClient.Websockets.RealMintWsConnection do
     end
   end
 
+  defp decode_fedecks_message({:pong, device_id}) do
+    {:fedecks_server_pong, device_id}
+  end
+
   defp decode_fedecks_message(message) do
     with {:ok, decoded} <- safe_decode(message) do
       case decoded do

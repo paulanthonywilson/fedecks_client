@@ -259,13 +259,15 @@ defmodule FedecksClient.Websockets.RealMintWsConnectionTest do
     end
   end
 
-  test "pongs are do not become messages" do
+  test "pongs are special messages" do
     mint_ws = connect_and_upgrade()
 
     %{conn: %{socket: socket}} = mint_ws
 
-    assert {:messages, %MintWs{}, []} =
+    assert {:messages, %MintWs{}, messages} =
              RealMintWsConnection.handle_in(mint_ws, {:tcp, socket, <<138, 5>> <> @device_id})
+
+    assert [{:fedecks_server_pong, @device_id}] == messages
   end
 
   test "closing" do
