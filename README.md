@@ -75,7 +75,7 @@ Note that your credentials are not stored locally. _Fedecks Server_ provides and
 ### Use it.
 
 
-Send messages up the connection with `c:FedecksClient.send/1` and `c:FedecksClient.send_raw/1`. Subscribe your process to messages received from the server with `c:FedecksClient.subscribe/0`.
+Send messages up the connection with `c:FedecksClient.send/1` and `c:FedecksClient.send_raw/1`. Subscribe your process to messages received from the server with `c:FedecksClient.subscribe/0`. See `c:FedecksClient.subscribe/0` for a list of messages you can expect.
 
 
 ## Behind the curtain

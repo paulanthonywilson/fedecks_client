@@ -16,3 +16,7 @@ Change of behaviour on receiving errors during connection upgrade. Previously Fe
 # v0.1.3
 
 Restarts the connection if a pong is not received in response to a ping, within 30 seconds.
+
+# v0.1.4
+
+Documents messages received on subscription.

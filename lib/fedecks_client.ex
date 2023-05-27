@@ -35,6 +35,9 @@ defmodule FedecksClient do
   connections will authenticate with a token provided by the server, persisting between reboots,
   until the token expires or otherwise becomes invalid.
 
+
+
+
   """
 
   @type connection_status ::
@@ -123,7 +126,21 @@ defmodule FedecksClient do
 
   @doc """
   Subscribe to Fedecks events. Messages are sent in the form `{ModuleName, message}`.
-  See module doc for messages
+
+  Messages you can expect are:
+
+  * `:unregistered` - not registered with the server side so should `c:login/1` should be called
+  * `:connection_scheduled` - we seem to have a valid token so a connection will be attempted
+  * `:connecting` - attempting to connect
+  * `:connected` - successful connection
+  * `{:connection_failed, reason}` - connection failed `reason`
+  * `{:upgrade_failed, reason}` - upgrading the connection to a websocket failed for `reason`
+  * `{:connection_error, error}` - an error occured while sending on the connection.
+  * `:connection_lost` - the connection was lost
+
+  You may be especially interested in
+
+  * `{:message, message}` - the message has been received from the Fedecks Server.
 
 
   Implementation provided by the `__using__` macro
