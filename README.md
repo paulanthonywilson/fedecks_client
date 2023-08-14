@@ -1,6 +1,6 @@
 # FedecksClient
 
-This is the client side of Fedecks for device to Phoenix communication over binary websockets. _Fedecks Client_ communicates with Phoenix application using [Fececks Server](https://hexdocs.pm/fedecks_server/readme.html).
+This is the client side of Fedecks for device to Phoenix communication over binary websockets. _Fedecks Client_ communicates with Phoenix application using [Fedecks Server](https://hexdocs.pm/fedecks_server/readme.html).
 
 It is written with [Nerves Projects](https://hexdocs.pm/nerves/getting-started.html) in mind. Connecting your Nerves boxes to a server in the cloud with Websockets gives you efficient two way communication from off your personal projects. 
 
